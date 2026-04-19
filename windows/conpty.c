@@ -267,9 +267,11 @@ static char *conpty_init(const BackendVtable *vt, Seat *seat,
     size.X = conf_get_int(conf, CONF_width);
     size.Y = conf_get_int(conf, CONF_height);
 
-    DWORD conpty_flags = PSEUDOCONSOLE_INHERIT_CURSOR |
+    DWORD conpty_flags;
+    conpty_flags = PSEUDOCONSOLE_INHERIT_CURSOR |
         PSEUDOCONSOLE_RESIZE_QUIRK |
         PSEUDOCONSOLE_WIN32_INPUT_MODE;
+    conpty_flags = 0;
     wchar_t dbg[256];
     _snwprintf(dbg, 256,
                L"pterm ConPTY: CreatePseudoConsole flags=0x%x size=%dx%d",
@@ -394,7 +396,7 @@ static char *conpty_init(const BackendVtable *vt, Seat *seat,
             char *msg = dupprintf(
                 "ConPTY backend initialised. "
                 "App dir: %s. "
-                "Flags: 0x%x (INHERIT_CURSOR|RESIZE_QUIRK|WIN32_INPUT_MODE). "
+                "Flags: 0x%x. "
                 "Dir has conpty.dll: %s.",
                 dir_utf8, (unsigned)conpty_flags,
                 has_conpty ? "YES" : "NO");

@@ -519,6 +519,17 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
      */
     gui_term_process_cmdline(wgs->conf, cmdline);
 
+    // After gui_term_process_cmdline, we are ensured that it is not --help.
+    // We should adhere to a console to prevent things like <NUL interfere with
+    // the std handles of child process OpenConsole.exe spawned by conpty.dll.
+    //
+    // the best option is AllocConsoleWithOptions that can opt to hide window,
+    // but it's 24H2 and higher...
+    // AllocConsole forces a window to show.
+    // so we are left only with AttachConsole(ATTACH_PARENT_PROCESS) ...
+    AttachConsole(ATTACH_PARENT_PROCESS);
+    // AllocConsole();
+
     memset(&wgs->ucsdata, 0, sizeof(wgs->ucsdata));
 
     conf_cache_data(wgs);
