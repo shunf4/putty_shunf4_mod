@@ -31,6 +31,95 @@ recording to work, you should manually ch{own,grp} and chmod the
 pterm binary yourself after installation. If you don't do this,
 pterm will still work, but not update the user login databases.
 
+pterm (Windows) command-line usage
+-----------------------------------
+
+On Windows, pterm.exe supports the following command-line options:
+
+  pterm [OPTIONS] [-e COMMAND [ARGS...]]
+
+Options:
+
+  -h, --help, -?, /?         Show help message
+  -load SESSION              Load a saved session by name
+  @SESSION                   Load a saved session (alternative syntax)
+  -o KEY=VALUE               Override a configuration setting
+  -sessionlog FILE           Log session output to FILE
+  -e COMMAND [ARGS...]       Run COMMAND instead of the default shell
+
+### The -o override option
+
+The `-o KEY=VALUE` option allows overriding any terminal configuration
+setting from the command line.  The key names match the PascalCase names
+used in the Windows registry under
+`HKEY_CURRENT_USER\Software\SimonTatham\PuTTY\Sessions\`.
+
+Common overrides:
+
+  Window size and position:
+    -o TermWidth=80            Terminal width in columns (default: 80)
+    -o TermHeight=24           Terminal height in rows (default: 24)
+    -o WinTitle=My Title       Set the initial window title
+    -o "StartupWindowPos=@active:center"
+                                Center on the monitor with mouse cursor
+    -o "StartupWindowPos=@screen:100,200"
+                                Position in virtual desktop coordinates
+    -o "StartupWindowPos=0:0,0"
+                                Top-left of the first monitor (by index)
+    -o "StartupWindowPos=\\\\.\\DISPLAY2:center"
+                                By monitor device name
+
+  StartupWindowPos format: `<monitor>:<position>`
+
+    `<monitor>` can be:
+      @active   = monitor containing the mouse cursor
+      @screen   = virtual desktop (all monitors combined)
+      <number>  = monitor index (0, 1, 2, ...)
+      <name>    = device name, e.g. `\\.\DISPLAY1`
+
+    `<position>` can be:
+      x,y       = pixel coordinates relative to the monitor work area
+      center    = center the window in the monitor
+
+  Scrollback:
+    -o ScrollbackLines=2000    Number of scrollback lines (default: 2000)
+    -o ScrollBar=true          Show/hide the scrollbar (true/false)
+
+  Font:
+    -o "Font=Consolas,14"      Font name and height
+    -o "Font=Courier New,12"   Font name with spaces must be quoted
+    Font value format: FontName[,Height[,Bold[,Charset]]]
+
+  Colours:
+    -o Colour0=255,255,255     Default Foreground (R,G,B, 0-255)
+    -o Colour2=0,0,0           Default Background (R,G,B, 0-255)
+    -o Colour1=255,255,255     Default Bold Foreground (R,G,B, 0-255)
+
+  Copy & paste:
+    -o CtrlShiftCV=explicit    Enable Ctrl+Shift+C/V copy/paste
+                               Values: none, implicit, explicit,
+                                       custom:<clipboard-name>
+    -o MousePaste=implicit     Mouse paste mode
+    -o MouseAutocopy=true      Auto-copy selected text
+
+Value types:
+  - Boolean: true/false, yes/no, or 1/0
+  - Integer: decimal numbers
+  - String: used as-is (quote the whole -o argument if it contains spaces)
+  - Font:    FontName[,Height[,Bold[,Charset]]]
+  - Colour:  R,G,B (three integers 0-255)
+
+For a complete list of configuration keys and their meanings, see the
+registry values in any saved session, or configure settings in PuTTY.exe
+and reuse them via -load.
+
+Examples:
+  pterm -o TermWidth=120 -o TermHeight=36 -o ScrollbackLines=10000
+  pterm -o "Font=Consolas,14" -o CtrlShiftCV=explicit
+  pterm -o WinTitle=Server -o "StartupWindowPos=@active:center"
+  pterm -o Colour0=255,255,255 -o Colour2=30,30,30  (light on dark)
+  pterm -load "Default Settings" -o TermWidth=100 -e cmd
+
 Documentation (in various formats including Windows Help and Unix
 `man' pages) is built from the Halibut (`.but') files in the `doc'
 subdirectory. If you aren't using one of our source snapshots,

@@ -1,9 +1,189 @@
 #include "putty.h"
 #include "storage.h"
+#include <fcntl.h>
 
 const unsigned cmdline_tooltype =
     TOOLTYPE_NONNETWORK |
     TOOLTYPE_NO_VERBOSE_OPTION;
+
+// the following (and the calling part below) is copied and modified
+// (so redirected outputs took into account) from contour-terminal/contour
+// Copyright Contour authors, Apache License 2.0
+static BOOL is_a_console(HANDLE h)
+{
+    DWORD modeDummy = 0;
+    return GetConsoleMode(h, &modeDummy);
+}
+
+static void reopen_console_handle(DWORD std, int fd, FILE* stream)
+{
+    HANDLE handle = GetStdHandle(std);
+    if (!is_a_console(handle))
+        return;
+    if (fd == 0)
+        freopen("CONIN$", "rt", stream);
+    else
+        freopen("CONOUT$", "wt", stream);
+
+    setvbuf(stream, NULL, _IONBF, 0);
+
+    // Set the low-level FD to the new handle value, since mp_subprocess2
+    // callers might rely on low-level FDs being set. Note, with this
+    // method, fileno(stdin) != STDIN_FILENO, but that shouldn't matter.
+    int unbound_fd = -1;
+    if (fd == 0)
+        unbound_fd = _open_osfhandle((intptr_t) handle, _O_RDONLY);
+    else
+        unbound_fd = _open_osfhandle((intptr_t) handle, _O_WRONLY);
+
+    // dup2 will duplicate the underlying handle. Don't close unbound_fd,
+    // since that will close the original handle.
+    if (unbound_fd != -1)
+        dup2(unbound_fd, fd);
+}
+
+static void show_help(void)
+{
+    const char *helptext =
+        "pterm: PuTTY-style terminal for local command prompts\n"
+        "\n"
+        "Usage: pterm [OPTIONS] [-e COMMAND [ARGS...]]\n"
+        "\n"
+        "Options:\n"
+        "  -h, --help, -?, /?         Show this help message\n"
+        "  -load SESSION              Load a saved session by name\n"
+        "  @SESSION                   Load a saved session (alternative syntax)\n"
+        "  -o KEY=VALUE               Override a configuration setting\n"
+        "  -sessionlog FILE           Log session output to FILE\n"
+        "  -e COMMAND [ARGS...]       Run COMMAND instead of the default shell\n"
+        "\n"
+        "Common -o overrides:\n"
+        "\n"
+        "  Window size and position:\n"
+        "    -o TermWidth=80          Terminal width in columns\n"
+        "    -o TermHeight=24         Terminal height in rows\n"
+        "    -o WinTitle=My Title     Set the initial window title\n"
+        "    -o \"StartupWindowPos=@active:center\"\n"
+        "                             Center on the monitor with mouse cursor\n"
+        "    -o \"StartupWindowPos=@screen:100,200\"\n"
+        "                             Position in virtual desktop coordinates\n"
+        "    -o \"StartupWindowPos=0:0,0\"\n"
+        "                             Top-left of the first monitor (by index)\n"
+        "    -o \"StartupWindowPos=\\\\.\\DISPLAY2:center\"\n"
+        "                             By monitor device name\n"
+        "\n"
+        "  StartupWindowPos format: <monitor>:<position>\n"
+        "    <monitor> can be:\n"
+        "      @active   = monitor containing the mouse cursor\n"
+        "      @screen   = virtual desktop (all monitors combined)\n"
+        "      <number>  = monitor index (0, 1, 2, ...)\n"
+        "      <name>    = device name, e.g. \\\\.\\DISPLAY1\n"
+        "    <position> can be:\n"
+        "      x,y       = pixel coordinates relative to the monitor area\n"
+        "      center    = center the window\n"
+        "\n"
+        "  Scrollback:\n"
+        "    -o ScrollbackLines=2000  Number of scrollback lines\n"
+        "    -o ScrollBar=true        Show/hide the scrollbar (true/false)\n"
+        "\n"
+        "  Font:\n"
+        "    -o \"Font=Consolas,14\"    Font name and size (height in points)\n"
+        "    -o \"Font=Courier New,12\" Font name with spaces must be quoted\n"
+        "\n"
+        "  Colours:\n"
+        "    -o Colour0=255,255,255   Default Foreground (R,G,B)\n"
+        "    -o Colour2=0,0,0         Default Background (R,G,B)\n"
+        "    -o Colour1=255,255,255   Default Bold Foreground (R,G,B)\n"
+        "\n"
+        "  Copy & paste:\n"
+        "    -o CtrlShiftCV=explicit  Enable Ctrl+Shift+C/V copy/paste\n"
+        "                             Values: none, implicit, explicit,\n"
+        "                                     custom:<clipboard-name>\n"
+        "    -o MousePaste=implicit   Mouse paste mode\n"
+        "    -o MouseAutocopy=true    Auto-copy selected text\n"
+        "\n"
+        "Boolean values: true/false, yes/no, or 1/0.\n"
+        "Integer values: decimal numbers.\n"
+        "Font values: FontName[,Height[,Bold[,Charset]]]\n"
+        "Colour values: R,G,B (three integers 0-255).\n"
+        "\n"
+        "For a complete list of configuration keys and their meanings,\n"
+        "see the Windows registry under:\n"
+        "  HKEY_CURRENT_USER\\Software\\SimonTatham\\PuTTY\\Sessions\\\n"
+        "or configure settings in PuTTY.exe and use -load to reuse them.\n"
+        "\n"
+        "Examples:\n"
+        "  pterm -o TermWidth=120 -o TermHeight=36 -o ScrollbackLines=10000\n"
+        "  pterm -o \"Font=Consolas,14\" -o CtrlShiftCV=explicit\n"
+        "  pterm -o WinTitle=Server -o \"StartupWindowPos=@active:center\"\n"
+        "  pterm -o Colour0=255,255,255 -o Colour2=30,30,30  (light on dark)\n"
+        "  pterm -load \"Default Settings\" -o TermWidth=100 -e cmd\n";
+
+    {
+        HANDLE hOut = GetStdHandle(STD_OUTPUT_HANDLE);
+        HANDLE hErr = GetStdHandle(STD_ERROR_HANDLE);
+        HANDLE hIn  = GetStdHandle(STD_INPUT_HANDLE);
+        DWORD modeDummy;
+
+        BOOL stdoutTouched, stderrTouched, stdInTouched;
+
+        if (hOut == NULL) {
+            stdoutTouched = FALSE;
+        } else if (hOut == INVALID_HANDLE_VALUE) {
+            stdoutTouched = FALSE; // ???
+        } else if (GetConsoleMode(hOut, &modeDummy)) {
+            stdoutTouched = TRUE;
+        } else {
+            stdoutTouched = TRUE;
+        }
+
+        if (hErr == NULL) {
+            stderrTouched = FALSE;
+        } else if (hErr == INVALID_HANDLE_VALUE) {
+            stderrTouched = FALSE; // ???
+        } else if (GetConsoleMode(hErr, &modeDummy)) {
+            stderrTouched = TRUE;
+        } else {
+            stderrTouched = TRUE;
+        }
+
+        if (hIn == NULL) {
+            stdInTouched = FALSE;
+        } else if (hIn == INVALID_HANDLE_VALUE) {
+            stdInTouched = FALSE; // ???
+        } else if (GetConsoleMode(hIn, &modeDummy)) {
+            stdInTouched = TRUE;
+        } else {
+            stdInTouched = TRUE;
+        }
+
+        if (!stdoutTouched && !stdInTouched && !stderrTouched) {
+            // Attach console from a GUI app, so printing to stdout
+            // and stderr works if the app is invoked in a console.
+            DWORD attachConsoleRet; 
+            attachConsoleRet = AttachConsole(ATTACH_PARENT_PROCESS);
+            if (attachConsoleRet != FALSE) {
+                // AttachConsole(ATTACH_PARENT_PROCESS) changes STD_*_HANDLE.
+                // but it does NOT change CRT stdin/stdout/stderr. Correct them.
+
+                // We have a console window. Redirect input/output streams to that console's
+                // low-level handles, so things that use stdio work later on.
+                reopen_console_handle(STD_INPUT_HANDLE, 0, stdin);
+                reopen_console_handle(STD_OUTPUT_HANDLE, 1, stdout);
+                reopen_console_handle(STD_ERROR_HANDLE, 2, stderr);
+            }
+        }
+    }
+    fprintf(stdout, "%s\n", helptext);
+    fflush(stdout);
+
+    /* Also show as a dialog (the primary UI for a GUI app) */
+    char *title = dupprintf("%s Usage", appname);
+    MessageBoxA(NULL, helptext, title, MB_ICONINFORMATION | MB_OK);
+    sfree(title);
+
+    exit(0);
+}
 
 void gui_term_process_cmdline(Conf *conf, char *cmdline)
 {
@@ -28,6 +208,9 @@ void gui_term_process_cmdline(Conf *conf, char *cmdline)
             arglistpos++;              /* skip next argument */
         } else if (retd == 1) {
             continue;          /* nothing further needs doing */
+        } else if (!strcmp(argstr, "-h") || !strcmp(argstr, "--help") ||
+                   !strcmp(argstr, "-?") || !strcmp(argstr, "/?")) {
+            show_help();
         } else if (!strcmp(argstr, "-e")) {
             if (nextarg) {
                 /* The command to execute is taken to be the unparsed
@@ -38,6 +221,21 @@ void gui_term_process_cmdline(Conf *conf, char *cmdline)
                 return;
             } else {
                 cmdline_error("option \"%s\" requires an argument", argstr);
+            }
+        } else if (!strcmp(argstr, "-o")) {
+            if (nextarg) {
+                const char *optstr = cmdline_arg_to_str(nextarg);
+                const char *eq = strchr(optstr, '=');
+                if (!eq)
+                    cmdline_error("syntax: -o Key=Value");
+                char *kw = dupprintf("%.*s", (int)(eq - optstr), optstr);
+                if (!conf_apply_override(conf, kw, eq + 1))
+                    cmdline_error("unrecognised or unsupported option "
+                                  "\"%s\"", kw);
+                sfree(kw);
+                arglistpos++;
+            } else {
+                cmdline_error("option \"-o\" requires an argument");
             }
         } else if (argstr[0] == '-') {
             cmdline_error("unrecognised option \"%s\"", argstr);

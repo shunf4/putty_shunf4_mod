@@ -1,0 +1,1 @@
+Windows Terminal v1.24.10921.0 Microsoft.Windows.Console.ConPTY.1.24.260402001.nupkg

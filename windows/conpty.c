@@ -25,6 +25,22 @@ struct ConPTY {
     Backend backend;
 };
 
+/*
+ * ConPTY flags that may not be in older SDK headers.
+ * PSEUDOCONSOLE_WIN32_INPUT_MODE (0x4): enables proper passthrough of
+ * VT input sequences (including mouse tracking) through ConPTY, which
+ * is required for TUI applications that use mouse interaction.
+ */
+#ifndef PSEUDOCONSOLE_INHERIT_CURSOR
+#define PSEUDOCONSOLE_INHERIT_CURSOR   0x1
+#endif
+#ifndef PSEUDOCONSOLE_RESIZE_QUIRK
+#define PSEUDOCONSOLE_RESIZE_QUIRK     0x2
+#endif
+#ifndef PSEUDOCONSOLE_WIN32_INPUT_MODE
+#define PSEUDOCONSOLE_WIN32_INPUT_MODE 0x4
+#endif
+
 DECL_WINDOWS_FUNCTION(static, HRESULT, CreatePseudoConsole,
                       (COORD, HANDLE, HANDLE, DWORD, HPCON *));
 DECL_WINDOWS_FUNCTION(static, void, ClosePseudoConsole, (HPCON));
@@ -35,10 +51,63 @@ static bool init_conpty_api(void)
     static bool tried = false;
     if (!tried) {
         tried = true;
+
+        /*
+         * First verify the system kernel32.dll has ConPTY support
+         * (Windows 10 October 2018 or newer).
+         */
         HMODULE kernel32_module = load_system32_dll("kernel32.dll");
         GET_WINDOWS_FUNCTION(kernel32_module, CreatePseudoConsole);
         GET_WINDOWS_FUNCTION(kernel32_module, ClosePseudoConsole);
         GET_WINDOWS_FUNCTION(kernel32_module, ResizePseudoConsole);
+
+        if (p_CreatePseudoConsole) {
+            OutputDebugStringW(L"pterm ConPTY: kernel32.dll ConPTY API available");
+
+            /*
+             * Prefer a sideloaded conpty.dll (deployed alongside the
+             * application). The Windows Terminal project ships an
+             * updated conpty.dll + OpenConsole.exe that fixes mouse
+             * tracking and other issues present in the system ConPTY.
+             *
+             * We must use the full path because dll_hijacking_protection()
+             * has already called SetDefaultDllDirectories() to restrict
+             * DLL loading to system32 only. A bare "conpty.dll" would
+             * fail to find the sideloaded copy.
+             */
+            wchar_t app_dir[MAX_PATH];
+            DWORD app_len = GetModuleFileNameW(NULL, app_dir, MAX_PATH);
+            if (app_len > 0) {
+                wchar_t *last_sep = wcsrchr(app_dir, L'\\');
+                if (last_sep) {
+                    *last_sep = L'\0';
+                    wchar_t conpty_path[MAX_PATH];
+                    _snwprintf(conpty_path, MAX_PATH,
+                               L"%s\\conpty.dll", app_dir);
+                    HMODULE conpty_module = LoadLibraryW(conpty_path);
+                    if (conpty_module) {
+                        OutputDebugStringW(
+                            L"pterm ConPTY: sideloaded conpty.dll found, "
+                            L"using it instead of kernel32.dll");
+                        GET_WINDOWS_FUNCTION_NO_TYPECHECK(
+                            conpty_module, CreatePseudoConsole);
+                        GET_WINDOWS_FUNCTION_NO_TYPECHECK(
+                            conpty_module, ClosePseudoConsole);
+                        GET_WINDOWS_FUNCTION_NO_TYPECHECK(
+                            conpty_module, ResizePseudoConsole);
+                    } else {
+                        OutputDebugStringW(
+                            L"pterm ConPTY: no sideloaded conpty.dll at "
+                            L"expected path, using kernel32.dll "
+                            L"(mouse may not work)");
+                    }
+                }
+            }
+        } else {
+            OutputDebugStringW(
+                L"pterm ConPTY: kernel32.dll does not export "
+                L"CreatePseudoConsole, ConPTY not available");
+        }
     }
 
     return (p_CreatePseudoConsole != NULL &&
@@ -198,7 +267,17 @@ static char *conpty_init(const BackendVtable *vt, Seat *seat,
     size.X = conf_get_int(conf, CONF_width);
     size.Y = conf_get_int(conf, CONF_height);
 
-    HRESULT result = p_CreatePseudoConsole(size, in_r, out_w, 0, &pcon);
+    DWORD conpty_flags = PSEUDOCONSOLE_INHERIT_CURSOR |
+        PSEUDOCONSOLE_RESIZE_QUIRK |
+        PSEUDOCONSOLE_WIN32_INPUT_MODE;
+    wchar_t dbg[256];
+    _snwprintf(dbg, 256,
+               L"pterm ConPTY: CreatePseudoConsole flags=0x%x size=%dx%d",
+               (unsigned)conpty_flags, (int)size.X, (int)size.Y);
+    OutputDebugStringW(dbg);
+
+    HRESULT result = p_CreatePseudoConsole(
+        size, in_r, out_w, conpty_flags, &pcon);
     if (FAILED(result)) {
         if (HRESULT_FACILITY(result) == FACILITY_WIN32)
             err = dupprintf("CreatePseudoConsole: %s",
@@ -208,6 +287,9 @@ static char *conpty_init(const BackendVtable *vt, Seat *seat,
                             (unsigned)result);
         goto out;
     }
+    _snwprintf(dbg, 256,
+               L"pterm ConPTY: CreatePseudoConsole success");
+    OutputDebugStringW(dbg);
     pcon_needs_cleanup = true;
 
     CloseHandle(in_r);
@@ -285,6 +367,42 @@ static char *conpty_init(const BackendVtable *vt, Seat *seat,
 
     conpty->seat = seat;
     conpty->logctx = logctx;
+
+    /*
+     * Log ConPTY diagnostics to the pterm event log
+     * (Ctrl-right-click → Event Log to view).
+     */
+    {
+        wchar_t module_path[MAX_PATH];
+        DWORD path_len = GetModuleFileNameW(NULL, module_path, MAX_PATH);
+        if (path_len > 0) {
+            wchar_t *last_sep = wcsrchr(module_path, L'\\');
+            if (last_sep)
+                *last_sep = L'\0';
+            wchar_t conpty_test[MAX_PATH];
+            _snwprintf(conpty_test, MAX_PATH,
+                       L"%s\\conpty.dll", module_path);
+            DWORD fattr = GetFileAttributesW(conpty_test);
+            bool has_conpty = (fattr != INVALID_FILE_ATTRIBUTES &&
+                               !(fattr & FILE_ATTRIBUTE_DIRECTORY));
+            char *dir_utf8 = dup_wc_to_mb(CP_UTF8, module_path, NULL);
+            if (!dir_utf8) {
+                dir_utf8 = dup_wc_to_mb(CP_ACP, module_path, NULL);
+                if (!dir_utf8)
+                    dir_utf8 = strdup("[Invalid path]");
+            }
+            char *msg = dupprintf(
+                "ConPTY backend initialised. "
+                "App dir: %s. "
+                "Flags: 0x%x (INHERIT_CURSOR|RESIZE_QUIRK|WIN32_INPUT_MODE). "
+                "Dir has conpty.dll: %s.",
+                dir_utf8, (unsigned)conpty_flags,
+                has_conpty ? "YES" : "NO");
+            sfree(dir_utf8);
+            logevent(logctx, msg);
+            sfree(msg);
+        }
+    }
 
     *realhost = dupstr("");
 

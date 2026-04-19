@@ -131,6 +131,7 @@ enum MONITOR_DPI_TYPE { MDT_EFFECTIVE_DPI, MDT_ANGULAR_DPI, MDT_RAW_DPI, MDT_DEF
 DECL_WINDOWS_FUNCTION(static, BOOL, GetMonitorInfoA, (HMONITOR, LPMONITORINFO));
 DECL_WINDOWS_FUNCTION(static, HMONITOR, MonitorFromPoint, (POINT, DWORD));
 DECL_WINDOWS_FUNCTION(static, HMONITOR, MonitorFromWindow, (HWND, DWORD));
+DECL_WINDOWS_FUNCTION(static, BOOL, EnumDisplayMonitors, (HDC, LPCRECT, MONITORENUMPROC, LPARAM));
 DECL_WINDOWS_FUNCTION(static, HRESULT, GetDpiForMonitor, (HMONITOR hmonitor, enum MONITOR_DPI_TYPE dpiType, UINT *dpiX, UINT *dpiY));
 DECL_WINDOWS_FUNCTION(static, HRESULT, GetSystemMetricsForDpi, (int nIndex, UINT dpi));
 DECL_WINDOWS_FUNCTION(static, HRESULT, AdjustWindowRectExForDpi, (LPRECT lpRect, DWORD dwStyle, BOOL bMenu, DWORD dwExStyle, UINT dpi));
@@ -386,6 +387,9 @@ static bool unicode_window;
 static BOOL (WINAPI *sw_PeekMessage)(LPMSG, HWND, UINT, UINT, UINT);
 static LRESULT (WINAPI *sw_DispatchMessage)(const MSG *);
 static LRESULT (WINAPI *sw_DefWindowProc)(HWND, UINT, WPARAM, LPARAM);
+static bool parse_startup_window_pos(const char *spec,
+                                      int win_w, int win_h,
+                                      int *out_x, int *out_y);
 static void sw_SetWindowText(HWND hwnd, wchar_t *text)
 {
     if (unicode_window) {
@@ -657,35 +661,37 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
      * off the edge of a monitor.
      */
     {
-        /* Find the previous coordinates of the window */
-        RECT winr;
-        GetWindowRect(wgs->term_hwnd, &winr);
+        int x, y;
+        const char *pos_spec = conf_get_str(wgs->conf, CONF_startup_window_pos);
 
-        int x = winr.left;
-        int y = winr.top;
+        if (pos_spec && *pos_spec &&
+            parse_startup_window_pos(pos_spec, guess_width, guess_height,
+                                     &x, &y)) {
+            /* StartupWindowPos was specified and parsed successfully */
+        } else {
+            /* No position override: use default position, clamped to monitor */
+            RECT winr;
+            GetWindowRect(wgs->term_hwnd, &winr);
 
-        /* Adjust them if necessary */
-        RECT war;
-        if (get_workingarea_rect(wgs, &war)) {
-            /*
-             * Try to ensure the window is entirely within the monitor's
-             * working area, by adjusting its position if not.
-             *
-             * We first move it left, if it overlaps off the right side. Then
-             * we move it right if it overlaps off the left side. This means
-             * that if it's wider than the working area (so that some overlap
-             * is unavoidable), we prefer to get its left edge in bounds than
-             * its right edge. Similarly, we do the y checks in the same
-             * order, privileging the top edge over the bottom.
-             */
-            if (x + guess_width > war.right)
-                x = war.right - guess_width;
-            if (x < war.left)
-                x = war.left;
-            if (y + guess_height > war.bottom)
-                y = war.bottom - guess_height;
-            if (y < war.top)
-                y = war.top;
+            x = winr.left;
+            y = winr.top;
+
+            /* Adjust them if necessary */
+            RECT war;
+            if (get_workingarea_rect(wgs, &war)) {
+                /*
+                 * Try to ensure the window is entirely within the monitor's
+                 * working area, by adjusting its position if not.
+                 */
+                if (x + guess_width > war.right)
+                    x = war.right - guess_width;
+                if (x < war.left)
+                    x = war.left;
+                if (y + guess_height > war.bottom)
+                    y = war.bottom - guess_height;
+                if (y < war.top)
+                    y = war.top;
+            }
         }
 
         /* And set the window to the final size and position we've chosen */
@@ -4135,6 +4141,7 @@ static void init_winfuncs(void)
     GET_WINDOWS_FUNCTION_NO_TYPECHECK(user32_module, GetMonitorInfoA);
     GET_WINDOWS_FUNCTION_NO_TYPECHECK(user32_module, MonitorFromPoint);
     GET_WINDOWS_FUNCTION_NO_TYPECHECK(user32_module, MonitorFromWindow);
+    GET_WINDOWS_FUNCTION_NO_TYPECHECK(user32_module, EnumDisplayMonitors);
     GET_WINDOWS_FUNCTION_NO_TYPECHECK(shcore_module, GetDpiForMonitor);
     GET_WINDOWS_FUNCTION_NO_TYPECHECK(user32_module, GetSystemMetricsForDpi);
     GET_WINDOWS_FUNCTION_NO_TYPECHECK(user32_module, AdjustWindowRectExForDpi);
@@ -5799,6 +5806,167 @@ static bool get_workingarea_rect(WinGuiSeat *wgs, RECT *ss)
     /* Fallback is the same as get_monitor_rect, which is good _enough_:
      * if the window overlaps the taskbar, that's not too bad a failure. */
     return GetClientRect(GetDesktopWindow(), ss);
+}
+
+/* ----------------------------------------------------------------------
+ * Parse StartupWindowPos config value and compute window position.
+ * Format: <monitor_specifier>:<pos>
+ *   monitor_specifier:
+ *     @active   = monitor containing the mouse cursor
+ *     @screen   = virtual desktop coordinates
+ *     <number>  = monitor index (0-based)
+ *     <name>    = monitor device name (e.g. \\.\DISPLAY1)
+ *   pos:
+ *     x,y       = pixel coordinates (relative to monitor work area or screen)
+ *     center     = center the window in the specified area
+ * Returns true if a valid position was computed, false if spec is empty/invalid.
+ */
+struct monitor_enum_by_index {
+    int target_index;
+    int current_index;
+    HMONITOR hmon;
+};
+
+struct monitor_enum_by_name {
+    const char *target_name;
+    HMONITOR hmon;
+};
+
+static BOOL CALLBACK monitor_enum_index_cb(HMONITOR hMon, HDC hdc,
+                                           LPRECT lprcMonitor, LPARAM dwData)
+{
+    struct monitor_enum_by_index *ctx = (struct monitor_enum_by_index *)dwData;
+    if (ctx->current_index == ctx->target_index) {
+        ctx->hmon = hMon;
+        return FALSE;
+    }
+    ctx->current_index++;
+    return TRUE;
+}
+
+static BOOL CALLBACK monitor_enum_name_cb(HMONITOR hMon, HDC hdc,
+                                          LPRECT lprcMonitor, LPARAM dwData)
+{
+    struct monitor_enum_by_name *ctx = (struct monitor_enum_by_name *)dwData;
+    MONITORINFOEXA mi;
+    mi.cbSize = sizeof(mi);
+    if (p_GetMonitorInfoA && p_GetMonitorInfoA(hMon, (LPMONITORINFO)&mi)) {
+        if (!strcmp(mi.szDevice, ctx->target_name)) {
+            ctx->hmon = hMon;
+            return FALSE;
+        }
+    }
+    return TRUE;
+}
+
+static HMONITOR find_monitor_by_index(int index)
+{
+    struct monitor_enum_by_index ctx = { index, 0, NULL };
+    if (p_EnumDisplayMonitors)
+        p_EnumDisplayMonitors(NULL, NULL, monitor_enum_index_cb, (LPARAM)&ctx);
+    return ctx.hmon;
+}
+
+static HMONITOR find_monitor_by_name(const char *name)
+{
+    struct monitor_enum_by_name ctx = { name, NULL };
+    if (p_EnumDisplayMonitors)
+        p_EnumDisplayMonitors(NULL, NULL, monitor_enum_name_cb, (LPARAM)&ctx);
+    return ctx.hmon;
+}
+
+static bool get_hmonitor_workarea(HMONITOR hmon, RECT *area)
+{
+    MONITORINFOEXA mi;
+    mi.cbSize = sizeof(mi);
+    if (p_GetMonitorInfoA && p_GetMonitorInfoA(hmon, (LPMONITORINFO)&mi)) {
+        *area = mi.rcWork;
+        return true;
+    }
+    return false;
+}
+
+static bool parse_startup_window_pos(const char *spec,
+                                      int win_w, int win_h,
+                                      int *out_x, int *out_y)
+{
+    if (!spec || !*spec)
+        return false;
+
+    /* Split at ':' - but watch for \\.\DISPLAY1:... where the ':'
+     * after the drive-letter-like prefix is part of the device name.
+     * We look for the LAST ':' to handle this. */
+    const char *colon = NULL;
+    for (const char *p = spec; *p; p++) {
+        if (*p == ':')
+            colon = p;
+    }
+    if (!colon || colon == spec)
+        return false;
+
+    size_t mon_len = colon - spec;
+    const char *pos_str = colon + 1;
+
+    char *mon_spec = dupprintf("%.*s", (int)mon_len, spec);
+
+    RECT area;
+    bool area_ok = false;
+
+    if (!strcmp(mon_spec, "@active")) {
+        /* Monitor containing the mouse cursor */
+        POINT pt;
+        GetCursorPos(&pt);
+        if (p_MonitorFromPoint) {
+            HMONITOR hmon = p_MonitorFromPoint(pt, MONITOR_DEFAULTTONEAREST);
+            area_ok = get_hmonitor_workarea(hmon, &area);
+        }
+    } else if (!strcmp(mon_spec, "@screen")) {
+        /* Virtual desktop coordinates */
+        area.left = GetSystemMetrics(SM_XVIRTUALSCREEN);
+        area.top = GetSystemMetrics(SM_YVIRTUALSCREEN);
+        area.right = area.left + GetSystemMetrics(SM_CXVIRTUALSCREEN);
+        area.bottom = area.top + GetSystemMetrics(SM_CYVIRTUALSCREEN);
+        area_ok = true;
+    } else {
+        /* Try as integer index first */
+        bool is_index = true;
+        for (size_t i = 0; i < mon_len; i++) {
+            if (mon_spec[i] < '0' || mon_spec[i] > '9') {
+                is_index = false;
+                break;
+            }
+        }
+        if (is_index) {
+            int idx = atoi(mon_spec);
+            HMONITOR hmon = find_monitor_by_index(idx);
+            if (hmon)
+                area_ok = get_hmonitor_workarea(hmon, &area);
+        } else {
+            /* Treat as monitor device name */
+            HMONITOR hmon = find_monitor_by_name(mon_spec);
+            if (hmon)
+                area_ok = get_hmonitor_workarea(hmon, &area);
+        }
+    }
+
+    sfree(mon_spec);
+
+    if (!area_ok)
+        return false;
+
+    /* Parse position part */
+    if (!strcmp(pos_str, "center")) {
+        *out_x = area.left + ((area.right - area.left) - win_w) / 2;
+        *out_y = area.top + ((area.bottom - area.top) - win_h) / 2;
+    } else {
+        int px, py;
+        if (sscanf(pos_str, "%d,%d", &px, &py) != 2)
+            return false;
+        *out_x = area.left + px;
+        *out_y = area.top + py;
+    }
+
+    return true;
 }
 
 

@@ -1056,6 +1056,122 @@ bool do_defaults(const char *session, Conf *conf)
     return load_settings(session, conf);
 }
 
+/* ----------------------------------------------------------------------
+ * Override a single Conf setting from a command-line -o Key=Value pair.
+ */
+
+static bool parse_bool_val(const char *s)
+{
+    if (!strcmp(s, "1") || !strcmp(s, "true") || !strcmp(s, "yes"))
+        return true;
+    if (!strcmp(s, "0") || !strcmp(s, "false") || !strcmp(s, "no"))
+        return false;
+    /* For any unrecognised value, treat non-zero as true */
+    return s[0] != '\0';
+}
+
+static bool apply_clip_override(Conf *conf, const char *value,
+                                int confkey, int strconfkey)
+{
+    int val;
+    conf_set_str(conf, strconfkey, "");
+    if (!strcmp(value, "implicit"))
+        val = CLIPUI_IMPLICIT;
+    else if (!strcmp(value, "explicit"))
+        val = CLIPUI_EXPLICIT;
+    else if (!strncmp(value, "custom:", 7)) {
+        val = CLIPUI_CUSTOM;
+        conf_set_str(conf, strconfkey, value + 7);
+    } else
+        val = CLIPUI_NONE;
+    conf_set_int(conf, confkey, val);
+    return true;
+}
+
+bool conf_apply_override(Conf *conf, const char *keyword, const char *value)
+{
+    /* Clipboard options have no save_keyword (LOAD_CUSTOM/SAVE_CUSTOM),
+     * so match them by keyword name directly. */
+    if (!strcmp(keyword, "MousePaste"))
+        return apply_clip_override(conf, value,
+                                   CONF_mousepaste, CONF_mousepaste_custom);
+    if (!strcmp(keyword, "CtrlShiftIns"))
+        return apply_clip_override(conf, value,
+                                   CONF_ctrlshiftins, CONF_ctrlshiftins_custom);
+    if (!strcmp(keyword, "CtrlShiftCV"))
+        return apply_clip_override(conf, value,
+                                   CONF_ctrlshiftcv, CONF_ctrlshiftcv_custom);
+
+    /* Colour options: Colour0..Colour21 stored as "R,G,B" strings,
+     * mapped to CONF_colours subkeys i*3+{0,1,2}. */
+    if (!strncmp(keyword, "Colour", 6) && keyword[6] >= '0' && keyword[6] <= '9') {
+        int idx = atoi(keyword + 6);
+        /* Verify the rest is purely digits */
+        const char *p = keyword + 6;
+        while (*p >= '0' && *p <= '9') p++;
+        if (*p != '\0')
+            return false;  /* trailing garbage after the number */
+        if (idx < 0 || idx >= 22)
+            return false;
+        int r, g, b;
+        if (sscanf(value, "%d,%d,%d", &r, &g, &b) != 3)
+            return false;
+        conf_set_int_int(conf, CONF_colours, idx * 3 + 0, r);
+        conf_set_int_int(conf, CONF_colours, idx * 3 + 1, g);
+        conf_set_int_int(conf, CONF_colours, idx * 3 + 2, b);
+        return true;
+    }
+
+    /* Generic lookup via conf_key_info[] */
+    for (size_t key = 0; key < N_CONFIG_OPTIONS; key++) {
+        const ConfKeyInfo *info = &conf_key_info[key];
+        if (info->not_saved || info->subkey_type != CONF_TYPE_NONE)
+            continue;
+        if (info->load_custom)
+            continue;
+        if (!info->save_keyword || strcmp(info->save_keyword, keyword))
+            continue;
+
+        switch (info->value_type) {
+          case CONF_TYPE_BOOL:
+            conf_set_bool(conf, key, parse_bool_val(value));
+            return true;
+          case CONF_TYPE_INT:
+            if (info->storage_enum) {
+                int confval;
+                if (!conf_enum_map_from_storage(
+                        info->storage_enum, atoi(value), &confval))
+                    return false;
+                conf_set_int(conf, key, confval);
+            } else {
+                conf_set_int(conf, key, atoi(value));
+            }
+            return true;
+          case CONF_TYPE_STR:
+          case CONF_TYPE_STR_AMBI:
+            conf_set_str(conf, key, value);
+            return true;
+          case CONF_TYPE_FILENAME: {
+            Filename *fn = filename_from_str(value);
+            conf_set_filename(conf, key, fn);
+            filename_free(fn);
+            return true;
+          }
+          case CONF_TYPE_FONT: {
+            FontSpec *fs = fontspec_new_from_override(value);
+            if (!fs)
+                return false;
+            conf_set_fontspec(conf, key, fs);
+            fontspec_free(fs);
+            return true;
+          }
+          default:
+            return false;
+        }
+    }
+    return false;
+}
+
 static int sessioncmp(const void *av, const void *bv)
 {
     const char *a = *(const char *const *) av;

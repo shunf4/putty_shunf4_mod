@@ -144,3 +144,16 @@ Makefile
 /windows/*.msi
 /windows/*.wixobj
 /windows/*.wixpdb
+
+
+/doc/*.sln
+/Release/**
+/Debug/**
+/x86/Release/**
+/x86/Debug/**
+/x64/Release/**
+/x64/Debug/**
+/*/x86/Release/**
+/*/x86/Debug/**
+/*/x64/Release/**
+/*/x64/Debug/**

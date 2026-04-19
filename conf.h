@@ -817,6 +817,11 @@ CONF_OPTION(win_name_always,
     DEFAULT_BOOL(true),
     SAVE_KEYWORD("WinNameAlways"),
 )
+CONF_OPTION(startup_window_pos,
+    VALUE_TYPE(STR),
+    DEFAULT_STR(""),
+    SAVE_KEYWORD("StartupWindowPos"),
+)
 CONF_OPTION(width,
     VALUE_TYPE(INT),
     DEFAULT_INT(80),

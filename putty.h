@@ -1928,6 +1928,7 @@ bool conf_deserialise(Conf *conf, BinarySource *src);/*returns true on success*/
  * freeable but won't actually be used for anything important.
  */
 FontSpec *fontspec_new_default(void);
+FontSpec *fontspec_new_from_override(const char *value);
 FontSpec *fontspec_copy(const FontSpec *f);
 void fontspec_free(FontSpec *f);
 void fontspec_serialise(BinarySink *bs, FontSpec *f);
@@ -1983,6 +1984,7 @@ bool load_settings(const char *section, Conf *conf);
 void load_open_settings(settings_r *sesskey, Conf *conf);
 void get_sesslist(struct sesslist *, bool allocate);
 bool do_defaults(const char *, Conf *);
+bool conf_apply_override(Conf *conf, const char *keyword, const char *value);
 void registry_cleanup(void);
 void settings_set_default_protocol(int);
 void settings_set_default_port(int);

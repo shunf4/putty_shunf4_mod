@@ -63,6 +63,11 @@ FontSpec *fontspec_new_default(void)
     return fontspec_new("");
 }
 
+FontSpec *fontspec_new_from_override(const char *value)
+{
+    return fontspec_new(value);
+}
+
 FontSpec *fontspec_copy(const FontSpec *f)
 {
     return fontspec_new(f->name);

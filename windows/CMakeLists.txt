@@ -172,6 +172,46 @@ if(HAVE_CONPTY)
     ${platform_libraries})
   set_target_properties(pterm PROPERTIES WIN32_EXECUTABLE ON)
   installed_program(pterm)
+
+  set(MODERN_OPENCONSOLE_CONPTY_ASSETS
+    ${CMAKE_CURRENT_SOURCE_DIR}/../terminal/asset/conpty.dll
+    ${CMAKE_CURRENT_SOURCE_DIR}/../terminal/asset/OpenConsole.exe
+  )
+
+  set(COPY_MODERN_OPENCONSOLE_CONPTY_ASSETS_TARGET copy_modern_openconsole_conpty_assets_target)
+
+  get_property(COPY_MODERN_OPENCONSOLE_CONPTY_ASSETS_IS_MULTI_PROJ_GENERATOR GLOBAL PROPERTY GENERATOR_IS_MULTI_CONFIG)
+  if (COPY_MODERN_OPENCONSOLE_CONPTY_ASSETS_IS_MULTI_PROJ_GENERATOR)
+    set(COPY_MODERN_OPENCONSOLE_CONPTY_ASSETS_DEST_DIR "${CMAKE_BINARY_DIR}/$<CONFIG>")
+  else()
+    set(COPY_MODERN_OPENCONSOLE_CONPTY_ASSETS_DEST_DIR ${CMAKE_BINARY_DIR})
+  endif()
+
+
+  foreach(asset ${MODERN_OPENCONSOLE_CONPTY_ASSETS})
+    get_filename_component(asset_name ${asset} NAME)
+    set(dest_file ${COPY_MODERN_OPENCONSOLE_CONPTY_ASSETS_DEST_DIR}/${asset_name})
+      
+    file(CHMOD ${asset} PERMISSIONS OWNER_EXECUTE OWNER_READ)
+    add_custom_command(
+      OUTPUT ${dest_file}
+      COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        ${asset}
+        ${dest_file}
+      DEPENDS ${asset}
+      COMMENT "Copying and setting permissions for ${asset_name}"
+    )
+    installed_program(${asset_name})
+    list(APPEND COPY_MODERN_OPENCONSOLE_CONPTY_ASSETS_OUTPUTS ${dest_file})
+  endforeach()
+
+  add_custom_target(${COPY_MODERN_OPENCONSOLE_CONPTY_ASSETS_TARGET}
+    DEPENDS ${COPY_MODERN_OPENCONSOLE_CONPTY_ASSETS_OUTPUTS}
+  )
+
+  add_dependencies(pterm ${COPY_MODERN_OPENCONSOLE_CONPTY_ASSETS_TARGET})
+  add_dependencies(putty ${COPY_MODERN_OPENCONSOLE_CONPTY_ASSETS_TARGET})
+
 else()
   message("ConPTY not available; cannot build Windows pterm")
 endif()
