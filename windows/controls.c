@@ -2050,8 +2050,9 @@ bool winctrl_handle_command(struct dlgparam *dp, UINT msg,
             cf.lStructSize = sizeof(cf);
             cf.hwndOwner = dp->hwnd;
             cf.lpLogFont = &lf;
-            cf.Flags = (dp->fixed_pitch_fonts ? CF_FIXEDPITCHONLY : 0) |
-                CF_FORCEFONTEXIST | CF_INITTOLOGFONTSTRUCT | CF_SCREENFONTS;
+            // cf.Flags = (dp->fixed_pitch_fonts ? CF_FIXEDPITCHONLY : 0) |
+            //     CF_FORCEFONTEXIST | CF_INITTOLOGFONTSTRUCT | CF_SCREENFONTS;
+            cf.Flags = CF_FORCEFONTEXIST | CF_INITTOLOGFONTSTRUCT | CF_SCREENFONTS;
 
             if (ChooseFont(&cf)) {
                 fs = fontspec_new(lf.lfFaceName, (lf.lfWeight == FW_BOLD),

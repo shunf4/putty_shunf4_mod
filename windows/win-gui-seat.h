@@ -27,6 +27,8 @@ enum { SYSMENU, CTXMENU };             /* indices into popup_menus field */
 #define FONT_MAXNO      0x40
 #define FONT_SHIFT      5
 
+#define FALLBACK_FONTS_MAX 3
+
 enum BoldMode {
     BOLD_NONE, BOLD_SHADOW, BOLD_FONT
 };
@@ -97,6 +99,8 @@ struct WinGuiSeat {
     HFONT fonts[FONT_MAXNO];
     LOGFONT lfont;
     bool fontflag[FONT_MAXNO];
+    HFONT fonts_fallback[FALLBACK_FONTS_MAX];
+    int fallback_font_count;
     enum BoldMode bold_font_mode;
 
     bool bold_colours;
