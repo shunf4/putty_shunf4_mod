@@ -1308,3 +1308,13 @@ CONF_OPTION(mswin_conpty_flags,
     DEFAULT_STR(""),
     NOT_SAVED,
 )
+CONF_OPTION(mswin_wait_before_console_behaviour_msec,
+    VALUE_TYPE(INT),
+    DEFAULT_INT(0),
+    SAVE_KEYWORD("MsWinWaitBeforeConsoleBehaviourMsec"),
+)
+CONF_OPTION(mswin_wait_after_console_behaviour_msec,
+    VALUE_TYPE(INT),
+    DEFAULT_INT(0),
+    SAVE_KEYWORD("MsWinWaitAfterConsoleBehaviourMsec"),
+)

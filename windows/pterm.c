@@ -134,6 +134,8 @@ static void show_help(void)
         "                               PSEUDOCONSOLE_INHERIT_CURSOR   (0x1)\n"
         "                               PSEUDOCONSOLE_RESIZE_QUIRK     (0x2)\n"
         "                               PSEUDOCONSOLE_WIN32_INPUT_MODE (0x4)\n"
+        "  -o MsWinWaitBeforeConsoleBehaviourMsec=2000\n"
+        "  -o MsWinWaitAfterConsoleBehaviourMsec=2000\n"
         "\n"
         "For a complete list of configuration keys and their meanings,\n"
         "see the Windows registry under:\n"

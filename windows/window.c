@@ -77,6 +77,8 @@
 #ifndef WM_MOUSEHWHEEL
 #define WM_MOUSEHWHEEL 0x020E          /* not defined in earlier SDKs */
 #endif
+
+// most of the time already defined by Windows
 #ifndef WHEEL_DELTA
 #define WHEEL_DELTA 120
 #endif
@@ -525,6 +527,13 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
     {
         const char *console_behaviour = conf_get_str(
             wgs->conf, CONF_mswin_console_behaviour_on_start);
+        int wait_before_console_behaviour_msec = conf_get_int(
+            wgs->conf, CONF_mswin_wait_before_console_behaviour_msec);
+        int wait_after_console_behaviour_msec = conf_get_int(
+            wgs->conf, CONF_mswin_wait_after_console_behaviour_msec);
+        if (wait_before_console_behaviour_msec > 0) {
+            Sleep(wait_before_console_behaviour_msec);
+        }
         if (!strcmp(console_behaviour, "allocHide")) {
             MessageBoxA(NULL,
                         "MsWinConsoleBehaviourOnStart=allocHide "
@@ -540,6 +549,9 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
         } else {
             /* Default: "attach" or empty/unrecognised */
             AttachConsole(ATTACH_PARENT_PROCESS);
+        }
+        if (wait_after_console_behaviour_msec > 0) {
+            Sleep(wait_after_console_behaviour_msec);
         }
     }
 
@@ -3493,7 +3505,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT message,
                     /* trigger a scroll */
                     term_scroll(wgs->term, 0,
                                 b == MBT_WHEEL_UP ?
-                                -wgs->term->rows / 2 : wgs->term->rows / 2);
+                                -wgs->term->rows * 7 / 24 : wgs->term->rows * 7 / 24);
                 }
             }
             return 0;

@@ -131,6 +131,9 @@ Common overrides:
                                  PSEUDOCONSOLE_RESIZE_QUIRK     (0x2)
                                  PSEUDOCONSOLE_WIN32_INPUT_MODE (0x4)
 
+  -o MsWinWaitBeforeConsoleBehaviourMsec=2000
+  -o MsWinWaitAfterConsoleBehaviourMsec=2000
+
 Value types:
   - Boolean: true/false, yes/no, or 1/0
   - Integer: decimal numbers
