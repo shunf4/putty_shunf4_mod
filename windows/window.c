@@ -5779,9 +5779,10 @@ static HRESULT STDMETHODCALLTYPE drop_Drop(
         ReleaseStgMedium(&stgm);
     }
 
-    if (found)
+    if (found) {
         *pdwEffect = DROPEFFECT_COPY;
-    return S_OK;
+        SetForegroundWindow(wgs->term_hwnd);
+    }
 }
 
 static const IDropTargetVtbl drop_vtbl = {
