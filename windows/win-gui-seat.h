@@ -27,7 +27,7 @@ enum { SYSMENU, CTXMENU };             /* indices into popup_menus field */
 #define FONT_MAXNO      0x40
 #define FONT_SHIFT      5
 
-#define FALLBACK_FONTS_MAX 3
+#define FALLBACK_FONTS_MAX 5
 
 enum BoldMode {
     BOLD_NONE, BOLD_SHADOW, BOLD_FONT
@@ -150,6 +150,8 @@ struct WinGuiSeat {
     WPARAM last_wm_mousemove_wParam, last_wm_ncmousemove_wParam;
     LPARAM last_wm_mousemove_lParam, last_wm_ncmousemove_lParam;
     wchar_t pending_surrogate;
+
+    IDropTarget *drop_target;
 };
 
 extern const LogPolicyVtable win_gui_logpolicy_vt; /* in dialog.c */

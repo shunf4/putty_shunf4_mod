@@ -30,6 +30,7 @@
 #include <commctrl.h>
 #include <richedit.h>
 #include <mmsystem.h>
+#include <ole2.h>
 
 /* From MSDN: In the WM_SYSCOMMAND message, the four low-order bits of
  * wParam are used by Windows, and should be masked off, so we shouldn't
@@ -116,6 +117,7 @@ static void clear_full_screen(WinGuiSeat *wgs);
 static void flip_full_screen(WinGuiSeat *wgs);
 static void process_clipdata(WinGuiSeat *wgs, HGLOBAL clipdata, bool unicode);
 static void setup_clipboards(Terminal *, Conf *);
+static IDropTarget *create_drop_target(WinGuiSeat *wgs);
 
 /* Window layout information */
 static void reset_window(WinGuiSeat *wgs, int reinit);
@@ -503,9 +505,9 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
     wgs->conf = conf_new();
 
     /*
-     * Initialize COM.
+     * Initialize COM (and OLE, for drag-and-drop support).
      */
-    hr = CoInitialize(NULL);
+    hr = OleInitialize(NULL);
     if (hr != S_OK && hr != S_FALSE) {
         char *str = dupprintf("%s Fatal Error", appname);
         MessageBox(NULL, "Failed to initialize COM subsystem",
@@ -844,6 +846,10 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
 
     gui_terminal_ready(wgs->term_hwnd, &wgs->seat, wgs->backend);
 
+    /* Register OLE drop target for drag-and-drop support. */
+    wgs->drop_target = create_drop_target(wgs);
+    RegisterDragDrop(wgs->term_hwnd, wgs->drop_target);
+
     while (1) {
         int n;
         DWORD timeout;
@@ -1056,8 +1062,8 @@ void cleanup_exit(int code)
     random_save_seed();
     shutdown_help();
 
-    /* Clean up COM. */
-    CoUninitialize();
+    /* Clean up COM and OLE. */
+    OleUninitialize();
 
     exit(code);
 }
@@ -1720,6 +1726,8 @@ static void init_fonts(WinGuiSeat *wgs, int pick_width, int pick_height)
             // L"Cambria Math",
             // L"Arial Unicode MS",
             // L"DejaVu Sans",
+            L"Dejavu Sans Mono",
+            L"Noto Sans Mono",
             L"Segoe UI",
             L"Segoe UI Symbol",
             L"Lucida Sans Unicode",
@@ -2350,6 +2358,11 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT message,
         return 0;
       }
       case WM_DESTROY:
+        if (wgs->drop_target) {
+            RevokeDragDrop(wgs->term_hwnd);
+            wgs->drop_target->lpVtbl->Release(wgs->drop_target);
+            wgs->drop_target = NULL;
+        }
         show_mouseptr(wgs, true);
         PostQuitMessage(0);
         return 0;
@@ -5630,6 +5643,165 @@ static void process_clipdata(WinGuiSeat *wgs, HGLOBAL clipdata, bool unicode)
     }
 
     sfree(clipboard_contents);
+}
+
+/* ================================================================
+ * OLE Drag & Drop support for terminal window.
+ * Supports dropping files (input their paths) and text.
+ * ================================================================ */
+
+typedef struct {
+    const IDropTargetVtbl *lpVtbl;
+    ULONG ref;
+    WinGuiSeat *wgs;
+} TerminalDropTarget;
+
+static ULONG STDMETHODCALLTYPE drop_AddRef(IDropTarget *This)
+{
+    TerminalDropTarget *dt = (TerminalDropTarget *)This;
+    return InterlockedIncrement((LONG *)&dt->ref);
+}
+
+static ULONG STDMETHODCALLTYPE drop_Release(IDropTarget *This)
+{
+    TerminalDropTarget *dt = (TerminalDropTarget *)This;
+    ULONG count = InterlockedDecrement((LONG *)&dt->ref);
+    if (count == 0)
+        sfree(dt);
+    return count;
+}
+
+static HRESULT STDMETHODCALLTYPE drop_QueryInterface(
+    IDropTarget *This, REFIID riid, void **ppv)
+{
+    if (IsEqualIID(riid, &IID_IUnknown) || IsEqualIID(riid, &IID_IDropTarget)) {
+        *ppv = This;
+        drop_AddRef(This);
+        return S_OK;
+    }
+    *ppv = NULL;
+    return E_NOINTERFACE;
+}
+
+static HRESULT STDMETHODCALLTYPE drop_DragEnter(
+    IDropTarget *This, IDataObject *pDataObj,
+    DWORD grfKeyState, POINTL pt, DWORD *pdwEffect)
+{
+    *pdwEffect = DROPEFFECT_COPY;
+    return S_OK;
+}
+
+static HRESULT STDMETHODCALLTYPE drop_DragOver(
+    IDropTarget *This, DWORD grfKeyState,
+    POINTL pt, DWORD *pdwEffect)
+{
+    *pdwEffect = DROPEFFECT_COPY;
+    return S_OK;
+}
+
+static HRESULT STDMETHODCALLTYPE drop_DragLeave(IDropTarget *This)
+{
+    return S_OK;
+}
+
+static HRESULT STDMETHODCALLTYPE drop_Drop(
+    IDropTarget *This, IDataObject *pDataObj,
+    DWORD grfKeyState, POINTL pt, DWORD *pdwEffect)
+{
+    TerminalDropTarget *dt = (TerminalDropTarget *)This;
+    WinGuiSeat *wgs = dt->wgs;
+    FORMATETC fmte = { 0, NULL, DVASPECT_CONTENT, -1, TYMED_HGLOBAL };
+    STGMEDIUM stgm = { TYMED_HGLOBAL, NULL, NULL };
+    bool found = false;
+
+    *pdwEffect = DROPEFFECT_NONE;
+
+    /* Try file drop (CF_HDROP) */
+    fmte.cfFormat = CF_HDROP;
+    if (SUCCEEDED(pDataObj->lpVtbl->GetData(pDataObj, &fmte, &stgm))) {
+        HDROP hdrop = (HDROP)GlobalLock(stgm.hGlobal);
+        if (hdrop) {
+            UINT count = DragQueryFileW(hdrop, 0xFFFFFFFF, NULL, 0);
+            if (count > 0) {
+                size_t bufsize = (size_t)count * (MAX_PATH + 4);
+                wchar_t *buf = snewn(bufsize, wchar_t);
+                size_t pos = 0;
+
+                for (UINT i = 0; i < count; i++) {
+                    wchar_t path[MAX_PATH];
+                    UINT len = DragQueryFileW(hdrop, i, path, MAX_PATH);
+                    bool need_quote = false;
+
+                    for (wchar_t *p = path; *p; p++) {
+                        if (*p == L'\\')
+                            *p = L'/';
+                        else if (*p == L' ' || *p == L'\t')
+                            need_quote = true;
+                    }
+
+                    /* Check if the whole entry fits: separator + quotes + path */
+                    size_t entry = len + (i > 0 ? 1 : 0) + (need_quote ? 2 : 0);
+                    if (pos + entry + 1 > bufsize)
+                        continue;
+
+                    if (i > 0)
+                        buf[pos++] = L' ';
+                    if (need_quote)
+                        buf[pos++] = L'"';
+                    memcpy(buf + pos, path, len * sizeof(wchar_t));
+                    pos += len;
+                    if (need_quote)
+                        buf[pos++] = L'"';
+                }
+
+                if (pos > 0)
+                    term_do_paste(wgs->term, buf, pos);
+                sfree(buf);
+            }
+            GlobalUnlock(stgm.hGlobal);
+            found = true;
+        }
+        ReleaseStgMedium(&stgm);
+    }
+
+    /* Try text drop (CF_UNICODETEXT) */
+    fmte.cfFormat = CF_UNICODETEXT;
+    if (!found && SUCCEEDED(pDataObj->lpVtbl->GetData(pDataObj, &fmte, &stgm))) {
+        wchar_t *data = (wchar_t *)GlobalLock(stgm.hGlobal);
+        if (data) {
+            size_t len = 0;
+            while (data[len]) len++;
+            if (len > 0)
+                term_do_paste(wgs->term, data, len);
+            GlobalUnlock(stgm.hGlobal);
+            found = true;
+        }
+        ReleaseStgMedium(&stgm);
+    }
+
+    if (found)
+        *pdwEffect = DROPEFFECT_COPY;
+    return S_OK;
+}
+
+static const IDropTargetVtbl drop_vtbl = {
+    drop_QueryInterface,
+    drop_AddRef,
+    drop_Release,
+    drop_DragEnter,
+    drop_DragOver,
+    drop_DragLeave,
+    drop_Drop,
+};
+
+static IDropTarget *create_drop_target(WinGuiSeat *wgs)
+{
+    TerminalDropTarget *dt = snew(TerminalDropTarget);
+    memset(dt, 0, sizeof(*dt));
+    dt->lpVtbl = &drop_vtbl;
+    dt->ref = 1;
+    dt->wgs = wgs;
+    return (IDropTarget *)dt;
 }
 
 static void wintw_clip_request_paste(TermWin *tw, int clipboard)
