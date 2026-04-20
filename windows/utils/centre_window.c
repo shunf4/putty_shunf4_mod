@@ -4,12 +4,16 @@
 
 #include "putty.h"
 
+extern bool monitor_area_containing_mouse(RECT *pArea);
+
 void centre_window(HWND win)
 {
     RECT rd, rw;
 
+    if (!monitor_area_containing_mouse(&rd)) {
     if (!GetWindowRect(GetDesktopWindow(), &rd))
         return;
+    }
     if (!GetWindowRect(win, &rw))
         return;
 

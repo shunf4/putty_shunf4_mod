@@ -8,8 +8,8 @@
         .nvalues = lenof(conf_enum_values_##name),                      \
     };
 
-#define VALUE(eval, sval) { eval, sval, false }
-#define VALUE_OBSOLETE(eval, sval) { eval, sval, true }
+#define VALUE(eval, sval) { eval, sval, #eval, false }
+#define VALUE_OBSOLETE(eval, sval) { eval, sval, NULL, true }
 
 #include "conf-enums.h"
 
@@ -33,6 +33,20 @@ bool conf_enum_map_from_storage(const ConfSaveEnumType *etype,
             *confval_out = etype->values[i].confval;
             return true;
         }
+    return false;
+}
+
+bool conf_enum_map_from_name(const ConfSaveEnumType *etype,
+                             const char *name, int *confval_out)
+{
+    for (size_t i = 0; i < etype->nvalues; i++) {
+        if (etype->values[i].obsolete || !etype->values[i].name)
+            continue;
+        if (!strcmp(etype->values[i].name, name)) {
+            *confval_out = etype->values[i].confval;
+            return true;
+        }
+    }
     return false;
 }
 

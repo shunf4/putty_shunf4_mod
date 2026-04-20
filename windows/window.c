@@ -522,13 +522,26 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
     // After gui_term_process_cmdline, we are ensured that it is not --help.
     // We should adhere to a console to prevent things like <NUL interfere with
     // the std handles of child process OpenConsole.exe spawned by conpty.dll.
-    //
-    // the best option is AllocConsoleWithOptions that can opt to hide window,
-    // but it's 24H2 and higher...
-    // AllocConsole forces a window to show.
-    // so we are left only with AttachConsole(ATTACH_PARENT_PROCESS) ...
-    AttachConsole(ATTACH_PARENT_PROCESS);
-    // AllocConsole();
+    {
+        const char *console_behaviour = conf_get_str(
+            wgs->conf, CONF_mswin_console_behaviour_on_start);
+        if (!strcmp(console_behaviour, "allocHide")) {
+            MessageBoxA(NULL,
+                        "MsWinConsoleBehaviourOnStart=allocHide "
+                        "is not yet implemented.",
+                        appname, MB_OK | MB_ICONERROR);
+            conf_free(wgs->conf);
+            sfree(wgs);
+            return 1;
+        } else if (!strcmp(console_behaviour, "alloc")) {
+            AllocConsole();
+        } else if (!strcmp(console_behaviour, "none")) {
+            /* Do nothing */
+        } else {
+            /* Default: "attach" or empty/unrecognised */
+            AttachConsole(ATTACH_PARENT_PROCESS);
+        }
+    }
 
     memset(&wgs->ucsdata, 0, sizeof(wgs->ucsdata));
 
@@ -1377,7 +1390,17 @@ static int get_font_width(WinGuiSeat *wgs, HDC hdc, const TEXTMETRIC *tm)
     int ret;
     /* Note that the TMPF_FIXED_PITCH bit is defined upside down :-( */
     if (!(tm->tmPitchAndFamily & TMPF_FIXED_PITCH)) {
-        ret = tm->tmAveCharWidth;
+        /*
+         * For fixed-pitch fonts, measure the actual width of an ASCII
+         * character instead of relying on tmAveCharWidth, which can
+         * report the full-width for CJK dual-width fonts (where ASCII
+         * glyphs are half-width and CJK glyphs are full-width).
+         */
+        INT w;
+        if (GetCharWidth32(hdc, 'M', 'M', &w) && w > 0)
+            ret = w;
+        else
+            ret = tm->tmAveCharWidth;
     } else {
 #define FIRST '0'
 #define LAST '9'
@@ -1512,7 +1535,20 @@ static void init_fonts(WinGuiSeat *wgs, int pick_width, int pick_height)
     /* Note that the TMPF_FIXED_PITCH bit is defined upside down :-( */
     if (!(tm.tmPitchAndFamily & TMPF_FIXED_PITCH)) {
         wgs->font_varpitch = false;
-        wgs->font_dualwidth = (tm.tmAveCharWidth != tm.tmMaxCharWidth);
+        /*
+         * Detect dual-width by comparing the actual ASCII character
+         * width against the max character width, rather than comparing
+         * tmAveCharWidth with tmMaxCharWidth. CJK dual-width fonts can
+         * have tmAveCharWidth == tmMaxCharWidth (both full-width),
+         * causing the old check to miss them.
+         */
+        {
+            INT ascii_w;
+            if (GetCharWidth32(hdc, 'M', 'M', &ascii_w) && ascii_w > 0)
+                wgs->font_dualwidth = (ascii_w != tm.tmMaxCharWidth);
+            else
+                wgs->font_dualwidth = (tm.tmAveCharWidth != tm.tmMaxCharWidth);
+        }
     } else {
         wgs->font_varpitch = true;
         wgs->font_dualwidth = true;
@@ -5897,6 +5933,17 @@ static bool get_hmonitor_workarea(HMONITOR hmon, RECT *area)
     return false;
 }
 
+bool monitor_area_containing_mouse(RECT *pArea) {
+    POINT pt;
+    GetCursorPos(&pt);
+    if (p_MonitorFromPoint) {
+        HMONITOR hmon = p_MonitorFromPoint(pt, MONITOR_DEFAULTTONEAREST);
+        return get_hmonitor_workarea(hmon, pArea);
+    } else {
+        return false;
+    }
+}
+
 static bool parse_startup_window_pos(const char *spec,
                                       int win_w, int win_h,
                                       int *out_x, int *out_y)
@@ -5925,12 +5972,7 @@ static bool parse_startup_window_pos(const char *spec,
 
     if (!strcmp(mon_spec, "@active")) {
         /* Monitor containing the mouse cursor */
-        POINT pt;
-        GetCursorPos(&pt);
-        if (p_MonitorFromPoint) {
-            HMONITOR hmon = p_MonitorFromPoint(pt, MONITOR_DEFAULTTONEAREST);
-            area_ok = get_hmonitor_workarea(hmon, &area);
-        }
+        area_ok = monitor_area_containing_mouse(&area);
     } else if (!strcmp(mon_spec, "@screen")) {
         /* Virtual desktop coordinates */
         area.left = GetSystemMetrics(SM_XVIRTUALSCREEN);

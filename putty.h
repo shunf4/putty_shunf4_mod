@@ -1863,6 +1863,7 @@ struct ConfSaveEnumType {
 };
 struct ConfSaveEnumValue {
     int confval, storageval;
+    const char *name;
     bool obsolete;
 };
 
@@ -1871,6 +1872,8 @@ bool conf_enum_map_to_storage(const ConfSaveEnumType *etype,
                               int confval, int *storageval_out);
 bool conf_enum_map_from_storage(const ConfSaveEnumType *etype,
                                 int storageval, int *confval_out);
+bool conf_enum_map_from_name(const ConfSaveEnumType *etype,
+                             const char *name, int *confval_out);
 
 /* Functions handling configuration structures. */
 Conf *conf_new(void);                  /* create an empty configuration */

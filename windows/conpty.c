@@ -267,11 +267,69 @@ static char *conpty_init(const BackendVtable *vt, Seat *seat,
     size.X = conf_get_int(conf, CONF_width);
     size.Y = conf_get_int(conf, CONF_height);
 
-    DWORD conpty_flags;
-    conpty_flags = PSEUDOCONSOLE_INHERIT_CURSOR |
-        PSEUDOCONSOLE_RESIZE_QUIRK |
-        PSEUDOCONSOLE_WIN32_INPUT_MODE;
-    conpty_flags = 0;
+    /*
+     * Parse ConPTY flags from config string.
+     * Format: flag names OR'd together with '|', e.g.
+     *   "PSEUDOCONSOLE_INHERIT_CURSOR|PSEUDOCONSOLE_WIN32_INPUT_MODE"
+     * or a plain integer like "0" or "7".
+     * Empty string defaults to: INHERIT_CURSOR | RESIZE_QUIRK |
+     * WIN32_INPUT_MODE (i.e. 0x7).
+     */
+    DWORD conpty_flags = 0;
+    {
+        const char *flagstr = conf_get_str(conf, CONF_mswin_conpty_flags);
+        if (flagstr[0] == '\0') {
+            /* Default: all known flags */
+            conpty_flags = PSEUDOCONSOLE_INHERIT_CURSOR |
+                PSEUDOCONSOLE_RESIZE_QUIRK |
+                PSEUDOCONSOLE_WIN32_INPUT_MODE;
+        } else {
+            /* Check if it looks like a plain integer (no alpha chars) */
+            bool is_int = true;
+            for (const char *p = flagstr; *p; p++) {
+                if ((*p < '0' || *p > '9') && *p != 'x' && *p != 'X'
+                    && *p != 'a' && *p != 'A'
+                    && *p != 'b' && *p != 'B'
+                    && *p != 'c' && *p != 'C'
+                    && *p != 'd' && *p != 'D'
+                    && *p != 'e' && *p != 'E'
+                    && *p != 'f' && *p != 'F') {
+                    is_int = false;
+                    break;
+                }
+            }
+            if (is_int) {
+                conpty_flags = (DWORD)strtoul(flagstr, NULL, 0);
+            } else {
+                /* Parse as OR'd flag names */
+                const char *p = flagstr;
+                while (*p) {
+                    /* Skip whitespace and | */
+                    while (*p == ' ' || *p == '\t' || *p == '|')
+                        p++;
+                    if (!*p)
+                        break;
+                    /* Find end of token */
+                    const char *tok_start = p;
+                    while (*p && *p != '|' && *p != ' ' && *p != '\t')
+                        p++;
+                    size_t tok_len = p - tok_start;
+                    if (tok_len == sizeof("PSEUDOCONSOLE_INHERIT_CURSOR") - 1 &&
+                        !strncmp(tok_start, "PSEUDOCONSOLE_INHERIT_CURSOR",
+                                 tok_len))
+                        conpty_flags |= PSEUDOCONSOLE_INHERIT_CURSOR;
+                    else if (tok_len == sizeof("PSEUDOCONSOLE_RESIZE_QUIRK") - 1 &&
+                             !strncmp(tok_start, "PSEUDOCONSOLE_RESIZE_QUIRK",
+                                      tok_len))
+                        conpty_flags |= PSEUDOCONSOLE_RESIZE_QUIRK;
+                    else if (tok_len == sizeof("PSEUDOCONSOLE_WIN32_INPUT_MODE") - 1 &&
+                             !strncmp(tok_start, "PSEUDOCONSOLE_WIN32_INPUT_MODE",
+                                      tok_len))
+                        conpty_flags |= PSEUDOCONSOLE_WIN32_INPUT_MODE;
+                }
+            }
+        }
+    }
     wchar_t dbg[256];
     _snwprintf(dbg, 256,
                L"pterm ConPTY: CreatePseudoConsole flags=0x%x size=%dx%d",
@@ -375,6 +433,35 @@ static char *conpty_init(const BackendVtable *vt, Seat *seat,
      * (Ctrl-right-click → Event Log to view).
      */
     {
+        /* Build a human-readable description of the flags */
+        char flags_desc[256];
+        {
+            char *fp = flags_desc;
+            char * const end = flags_desc + sizeof(flags_desc);
+            bool first = true;
+            fp += snprintf(fp, end - fp, "0x%x", (unsigned)conpty_flags);
+            if (conpty_flags != 0) {
+                fp += snprintf(fp, end - fp, " (");
+                if (conpty_flags & PSEUDOCONSOLE_INHERIT_CURSOR) {
+                    if (!first) fp += snprintf(fp, end - fp, "|");
+                    fp += snprintf(fp, end - fp, "INHERIT_CURSOR");
+                    first = false;
+                }
+                if (conpty_flags & PSEUDOCONSOLE_RESIZE_QUIRK) {
+                    if (!first) fp += snprintf(fp, end - fp, "|");
+                    fp += snprintf(fp, end - fp, "RESIZE_QUIRK");
+                    first = false;
+                }
+                if (conpty_flags & PSEUDOCONSOLE_WIN32_INPUT_MODE) {
+                    if (!first) fp += snprintf(fp, end - fp, "|");
+                    fp += snprintf(fp, end - fp, "WIN32_INPUT_MODE");
+                    first = false;
+                }
+                snprintf(fp, end - fp, ")");
+            }
+        }
+
+        char *msg;
         wchar_t module_path[MAX_PATH];
         DWORD path_len = GetModuleFileNameW(NULL, module_path, MAX_PATH);
         if (path_len > 0) {
@@ -393,17 +480,26 @@ static char *conpty_init(const BackendVtable *vt, Seat *seat,
                 if (!dir_utf8)
                     dir_utf8 = strdup("[Invalid path]");
             }
-            char *msg = dupprintf(
+            msg = dupprintf(
                 "ConPTY backend initialised. "
                 "App dir: %s. "
-                "Flags: 0x%x. "
+                "Flags: %s. "
+                "Size: %dx%d. "
                 "Dir has conpty.dll: %s.",
-                dir_utf8, (unsigned)conpty_flags,
+                dir_utf8, flags_desc,
+                (int)size.X, (int)size.Y,
                 has_conpty ? "YES" : "NO");
             sfree(dir_utf8);
-            logevent(logctx, msg);
-            sfree(msg);
+        } else {
+            msg = dupprintf(
+                "ConPTY backend initialised. "
+                "Flags: %s. "
+                "Size: %dx%d.",
+                flags_desc,
+                (int)size.X, (int)size.Y);
         }
+        logevent(logctx, msg);
+        sfree(msg);
     }
 
     *realhost = dupstr("");

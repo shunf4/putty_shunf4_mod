@@ -1102,6 +1102,16 @@ bool conf_apply_override(Conf *conf, const char *keyword, const char *value)
         return apply_clip_override(conf, value,
                                    CONF_ctrlshiftcv, CONF_ctrlshiftcv_custom);
 
+    /* Windows-specific pterm options (NOT_SAVED, no save_keyword). */
+    if (!strcmp(keyword, "MsWinConsoleBehaviourOnStart")) {
+        conf_set_str(conf, CONF_mswin_console_behaviour_on_start, value);
+        return true;
+    }
+    if (!strcmp(keyword, "MsWinConptyFlags")) {
+        conf_set_str(conf, CONF_mswin_conpty_flags, value);
+        return true;
+    }
+
     /* Colour options: Colour0..Colour21 stored as "R,G,B" strings,
      * mapped to CONF_colours subkeys i*3+{0,1,2}. */
     if (!strncmp(keyword, "Colour", 6) && keyword[6] >= '0' && keyword[6] <= '9') {
@@ -1139,10 +1149,16 @@ bool conf_apply_override(Conf *conf, const char *keyword, const char *value)
           case CONF_TYPE_INT:
             if (info->storage_enum) {
                 int confval;
-                if (!conf_enum_map_from_storage(
-                        info->storage_enum, atoi(value), &confval))
+                /* Try name mapping first for non-numeric strings */
+                if (conf_enum_map_from_name(
+                        info->storage_enum, value, &confval)) {
+                    conf_set_int(conf, key, confval);
+                } else if (conf_enum_map_from_storage(
+                        info->storage_enum, atoi(value), &confval)) {
+                    conf_set_int(conf, key, confval);
+                } else {
                     return false;
-                conf_set_int(conf, key, confval);
+                }
             } else {
                 conf_set_int(conf, key, atoi(value));
             }

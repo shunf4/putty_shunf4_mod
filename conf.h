@@ -1296,3 +1296,15 @@ CONF_OPTION(winclass,
     DEFAULT_STR(""),
     SAVE_KEYWORD("WindowClass"),
 )
+
+/* Windows-specific pterm options (not saved to sessions) */
+CONF_OPTION(mswin_console_behaviour_on_start,
+    VALUE_TYPE(STR),
+    DEFAULT_STR(""),
+    NOT_SAVED,
+)
+CONF_OPTION(mswin_conpty_flags,
+    VALUE_TYPE(STR),
+    DEFAULT_STR(""),
+    NOT_SAVED,
+)

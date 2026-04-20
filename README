@@ -9,7 +9,7 @@ simplest way (on any of Linux, Windows or Mac), the general method is
 to run these commands in the source directory:
 
   cmake .
-  cmake --build .
+  cmake --build . --config Release
 
 These commands will expect to find a usable compile toolchain on your
 path. So if you're building on Windows with MSVC, you'll need to make
@@ -59,7 +59,7 @@ Common overrides:
   Window size and position:
     -o TermWidth=80            Terminal width in columns (default: 80)
     -o TermHeight=24           Terminal height in rows (default: 24)
-    -o WinTitle=My Title       Set the initial window title
+    -o 'WinTitle=My Title"     Set the initial window title
     -o "StartupWindowPos=@active:center"
                                 Center on the monitor with mouse cursor
     -o "StartupWindowPos=@screen:100,200"
@@ -102,9 +102,39 @@ Common overrides:
     -o MousePaste=implicit     Mouse paste mode
     -o MouseAutocopy=true      Auto-copy selected text
 
+  Bell / indication:
+    -o BeepInd=0               Bell indication mode:
+                                 0 / B_IND_DISABLED = no indication
+                                 1 / B_IND_FLASH    = flash window
+                                 2 / B_IND_STEADY   = steady indication
+    -o ScrollOnKey=true        Scroll to bottom on keypress
+    -o ScrollOnDisp=true       Scroll to bottom on new output
+    -o ScrollBarFullScreen=false
+                               Show scrollbar in fullscreen mode
+
+  Windows console behaviour (pterm-specific):
+    -o MsWinConsoleBehaviourOnStart=attach
+                               Console behaviour on startup:
+                                 attach    = AttachConsole(ATTACH_PARENT_PROCESS)
+                                             (default)
+                                 alloc     = AllocConsole()
+                                 allocHide = not implemented
+                                 none      = do not attach or allocate
+
+  ConPTY flags (pterm-specific):
+    -o "MsWinConptyFlags=PSEUDOCONSOLE_INHERIT_CURSOR|PSEUDOCONSOLE_WIN32_INPUT_MODE"
+                               Flags passed to CreatePseudoConsole.
+                               Use flag names with | or a hex/dec integer.
+                               Default (empty): all flags (0x7).
+                               Available flags:
+                                 PSEUDOCONSOLE_INHERIT_CURSOR   (0x1)
+                                 PSEUDOCONSOLE_RESIZE_QUIRK     (0x2)
+                                 PSEUDOCONSOLE_WIN32_INPUT_MODE (0x4)
+
 Value types:
   - Boolean: true/false, yes/no, or 1/0
   - Integer: decimal numbers
+  - Enum int: integer or enum constant name (e.g. B_IND_FLASH)
   - String: used as-is (quote the whole -o argument if it contains spaces)
   - Font:    FontName[,Height[,Bold[,Charset]]]
   - Colour:  R,G,B (three integers 0-255)
@@ -119,6 +149,7 @@ Examples:
   pterm -o WinTitle=Server -o "StartupWindowPos=@active:center"
   pterm -o Colour0=255,255,255 -o Colour2=30,30,30  (light on dark)
   pterm -load "Default Settings" -o TermWidth=100 -e cmd
+  pterm -o MsWinConsoleBehaviourOnStart=none -o MsWinConptyFlags=0x5 -e wsl
 
 Documentation (in various formats including Windows Help and Unix
 `man' pages) is built from the Halibut (`.but') files in the `doc'
