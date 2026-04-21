@@ -2,45 +2,12 @@
 #include "storage.h"
 #include <fcntl.h>
 
+extern void tryAttachConsoleAndResetCrtFds();
+
 const unsigned cmdline_tooltype =
     TOOLTYPE_NONNETWORK |
     TOOLTYPE_NO_VERBOSE_OPTION;
 
-// the following (and the calling part below) is copied and modified
-// (so redirected outputs took into account) from contour-terminal/contour
-// Copyright Contour authors, Apache License 2.0
-static BOOL is_a_console(HANDLE h)
-{
-    DWORD modeDummy = 0;
-    return GetConsoleMode(h, &modeDummy);
-}
-
-static void reopen_console_handle(DWORD std, int fd, FILE* stream)
-{
-    HANDLE handle = GetStdHandle(std);
-    if (!is_a_console(handle))
-        return;
-    if (fd == 0)
-        freopen("CONIN$", "rt", stream);
-    else
-        freopen("CONOUT$", "wt", stream);
-
-    setvbuf(stream, NULL, _IONBF, 0);
-
-    // Set the low-level FD to the new handle value, since mp_subprocess2
-    // callers might rely on low-level FDs being set. Note, with this
-    // method, fileno(stdin) != STDIN_FILENO, but that shouldn't matter.
-    int unbound_fd = -1;
-    if (fd == 0)
-        unbound_fd = _open_osfhandle((intptr_t) handle, _O_RDONLY);
-    else
-        unbound_fd = _open_osfhandle((intptr_t) handle, _O_WRONLY);
-
-    // dup2 will duplicate the underlying handle. Don't close unbound_fd,
-    // since that will close the original handle.
-    if (unbound_fd != -1)
-        dup2(unbound_fd, fd);
-}
 
 static void show_help(void)
 {
@@ -192,18 +159,7 @@ static void show_help(void)
         if (!stdoutTouched && !stdInTouched && !stderrTouched) {
             // Attach console from a GUI app, so printing to stdout
             // and stderr works if the app is invoked in a console.
-            DWORD attachConsoleRet; 
-            attachConsoleRet = AttachConsole(ATTACH_PARENT_PROCESS);
-            if (attachConsoleRet != FALSE) {
-                // AttachConsole(ATTACH_PARENT_PROCESS) changes STD_*_HANDLE.
-                // but it does NOT change CRT stdin/stdout/stderr. Correct them.
-
-                // We have a console window. Redirect input/output streams to that console's
-                // low-level handles, so things that use stdio work later on.
-                reopen_console_handle(STD_INPUT_HANDLE, 0, stdin);
-                reopen_console_handle(STD_OUTPUT_HANDLE, 1, stdout);
-                reopen_console_handle(STD_ERROR_HANDLE, 2, stderr);
-            }
+            tryAttachConsoleAndResetCrtFds();
         }
     }
     fprintf(stdout, "%s\n", helptext);

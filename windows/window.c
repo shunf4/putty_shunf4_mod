@@ -10,6 +10,7 @@
 #include <limits.h>
 #include <assert.h>
 #include <wchar.h>
+#include <fcntl.h>
 
 #define COMPILE_MULTIMON_STUBS
 
@@ -407,6 +408,63 @@ static void sw_SetWindowText(HWND hwnd, wchar_t *text)
 
 static HINSTANCE hprev;
 
+// the following (and the calling part below) is copied and modified
+// (so redirected outputs took into account) from contour-terminal/contour
+// Copyright Contour authors, Apache License 2.0
+static BOOL is_a_console(HANDLE h)
+{
+    DWORD modeDummy = 0;
+    return GetConsoleMode(h, &modeDummy);
+}
+
+static void reopen_console_handle(DWORD std, int fd, FILE* stream)
+{
+    HANDLE handle = GetStdHandle(std);
+    if (!is_a_console(handle))
+        return;
+    if (fd == 0)
+        freopen("CONIN$", "rt", stream);
+    else
+        freopen("CONOUT$", "wt", stream);
+
+    setvbuf(stream, NULL, _IONBF, 0);
+
+    // Set the low-level FD to the new handle value, since mp_subprocess2
+    // callers might rely on low-level FDs being set. Note, with this
+    // method, fileno(stdin) != STDIN_FILENO, but that shouldn't matter.
+    int unbound_fd = -1;
+    if (fd == 0)
+        unbound_fd = _open_osfhandle((intptr_t) handle, _O_RDONLY);
+    else
+        unbound_fd = _open_osfhandle((intptr_t) handle, _O_WRONLY);
+
+    // dup2 will duplicate the underlying handle. Don't close unbound_fd,
+    // since that will close the original handle.
+    if (unbound_fd != -1)
+        dup2(unbound_fd, fd);
+}
+
+void tryAttachConsoleAndResetCrtFds() {
+    DWORD attachConsoleRet; 
+    attachConsoleRet = AttachConsole(ATTACH_PARENT_PROCESS);
+    if (attachConsoleRet != FALSE) {
+        // AttachConsole(ATTACH_PARENT_PROCESS) changes STD_*_HANDLE.
+        // but it does NOT change CRT stdin/stdout/stderr. Correct them.
+
+        // We have a console window. Redirect input/output streams to that console's
+        // low-level handles, so things that use stdio work later on.
+        reopen_console_handle(STD_INPUT_HANDLE, 0, stdin);
+        reopen_console_handle(STD_OUTPUT_HANDLE, 1, stdout);
+        reopen_console_handle(STD_ERROR_HANDLE, 2, stderr);
+    } else {
+        {
+            char odbgErr[200];
+            sprintf(odbgErr, "tryAttachConsoleAndResetCrtFds: AttachConsole fail %ld", GetLastError());
+            OutputDebugStringA(odbgErr);
+        }
+    }
+}
+
 /*
  * Also, registering window classes has to be done in a fiddly way.
  */
@@ -534,7 +592,17 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
         int wait_after_console_behaviour_msec = conf_get_int(
             wgs->conf, CONF_mswin_wait_after_console_behaviour_msec);
         if (wait_before_console_behaviour_msec > 0) {
+            {
+                char odbgErr[200];
+                sprintf(odbgErr, "MsWinWaitBeforeConsoleBehaviour: waiting, current pid: %ld", GetCurrentProcessId());
+                OutputDebugStringA(odbgErr);
+            }
             Sleep(wait_before_console_behaviour_msec);
+            {
+                char odbgErr[200];
+                sprintf(odbgErr, "MsWinWaitBeforeConsoleBehaviour: done wait, current pid: %ld", GetCurrentProcessId());
+                OutputDebugStringA(odbgErr);
+            }
         }
         if (!strcmp(console_behaviour, "allocHide")) {
             MessageBoxA(NULL,
@@ -550,7 +618,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
             /* Do nothing */
         } else {
             /* Default: "attach" or empty/unrecognised */
-            AttachConsole(ATTACH_PARENT_PROCESS);
+            tryAttachConsoleAndResetCrtFds();
         }
         if (wait_after_console_behaviour_msec > 0) {
             Sleep(wait_after_console_behaviour_msec);
