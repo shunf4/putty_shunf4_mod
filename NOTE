@@ -1,0 +1,248 @@
+[[[Profile Sourced]]]
+bmi-m.!-i.!!-g.
+Setting SHELL=
+  Welcome to Codex, OpenAI's command-line coding agent
+
+> You are in C:\Users\shunf4\Downloads\mintty-master
+
+  Do you trust the contents of this directory? Working with untrusted contents comes with higher risk of prompt
+  injection.
+
+› 1. Yes, continue
+  2. No, quit
+
+  Press enter to continue
+
+╭─────────────────────────────────────────────────╮
+│ ✨ Update available! 0.118.0 -> 0.122.0         │
+│ Run npm install -g @openai/codex to update.     │
+│                                                 │
+│ See full release notes:                         │
+│ https://github.com/openai/codex/releases/latest │
+╰─────────────────────────────────────────────────╯
+
+╭────────────────────────────────────────────────────╮
+│ >_ OpenAI Codex (v0.118.0)                         │
+│                                                    │
+│ model:     gpt-5.3-codex medium   /model to change │
+│ directory: ~\Downloads\mintty-master               │
+╰────────────────────────────────────────────────────╯
+
+  Tip: New Build faster with Codex.
+
+
+› mintty renders the TUI logo made up of "block" unicode characters almost perfectly, like▐▛███▜▌, without gaps
+  between glyphs, even when user chose a font that only covers some of the glyphs, or the glyphs have different
+  design (less height, several pixels missing on the right, etc) from other fonts. Is there something like a smart
+  fallback/font selection coercion mechanism in mintty? Please explore current code repository (mintty) and find
+  out.
+
+
+• I’ll inspect mintty’s font rendering and fallback code paths first, then trace where block-drawing glyphs are
+  handled specially versus normal fallback. After that I’ll summarize exactly what mechanism produces seamless logo
+  rendering.
+
+• Running Get-ChildItem -Name
+
+• Ran Get-ChildItem -Name
+  └ attic
+    cygwin
+    … +18 lines
+    README.md
+    VERSION
+
+• Ran rg -n "fallback|font|glyph|block|box|Unicode|directwrite|Uniscribe|shaping" -S src
+  └ src\htmlhtml.sed:2:       .h3 {font-size: 13pt;}\
+    src\charset.h:49:extern wchar cs_btowc_glyph(char);
+    … +2358 lines
+    src\wintab.c:324:    create_tabbar_font();
+    src\wintab.c:337:    create_tabbar_font();
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+• I found strong signals in src/wintext.c that mintty treats Box Drawing/Powerline symbols as a special self-drawn
+  path, separate from normal font fallback. Next I’m reading those exact functions and any docs/comments that
+  describe fallback behavior.
+
+• Running rg -n "FontRTL|scriptfont|fallback|box drawing|Powerline|font fallback|font linking" docs wiki README.md
+  │ src -S
+
+• Ran rg -n "boxpower|self-drawn|selfdrawn|scriptfont|fontfamilies\[11\]|FontRTL|fallback|font linking|
+  │ GetGlyphIndicesW|HasCharacter|Draw|box drawing|Powerline" src/wintext.c -S
+  └ 691:  // as this does not report error and font fallback, check explicitly:
+    860:  GetGlyphIndicesW(dc, W("אا"), 2, rtlglyphs, true);
+    … +58 lines
+    5437:       !(  (c >= 0x2500 && c <= 0x2588)  // Box Drawing, Block Elements
+    5520:    GetGlyphIndicesW(dc, cs, 1, &glyph, true);
+
+• Ran rg -n "FontRTL|scriptfont|fallback|box drawing|Powerline|font fallback|font linking" docs wiki README.md src
+  │ -S
+  └ docs\mintty.1:1385:file independently of the encoding the terminal runs in; as a fallback,
+    docs\mintty.1:1393:Language, Font, Font1..10, FontRTL, FontSample, FontChoice,
+    … +126 lines
+    src\wintext.c:5177:    // this optimization ignores font fallback and should be dropped
+    src\wintext.c:5237:    // this is unreliable if font fallback is involved (#615)
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+• I’ve isolated the relevant hotspots: term.c marks certain Unicode ranges, termout.c maps them to special font
+  indices, and wintext.c draws many of them itself. I’m now reading those exact sections to confirm whether it’s
+  fallback or coercive self-rendering.
+
+• Running $p='src/wintext.c'; Get-Content $p | Select-Object -Skip 3088 -First 120 | % {$global:k=($global:k+1)}
+  │ {"{0}:{1}" -f (3088+$k),$_}
+
+• Running $p='src/termout.c'; Get-Content $p | Select-Object -Skip 1330 -First 190 | % {$global:j=($global:j+1)}
+  │ {"{0}:{1}" -f (1330+$j),$_}
+
+• Ran $p='src/termout.c'; Get-Content $p | Select-Object -Skip 1330 -First 190 | % {$global:j=($global:j+1)} {"{0}:
+  │ {1}" -f (1330+$j),$_}
+  └ 1331:    if (curs->x >= term.cols / 2) {
+    1331:      curs->x--;
+    … +186 lines
+    1331:  // 1. check here with the glyph checking function dw_check_glyphs;
+    1331:  //    this raises a huge performance penalty
+
+• Ran $p='src/wintext.c'; Get-Content $p | Select-Object -Skip 3088 -First 120 | % {$global:k=($global:k+1)} {"{0}:
+  │ {1}" -f (3088+$k),$_}
+  └ 3089: * Draw a line of text in the window, at given character
+    3089: * coordinates, in given attributes.
+    … +116 lines
+    3089:  if (attr.attr & (TATTR_CURRESULT | TATTR_CURMARKED)) {
+    3089:    bg = cfg.search_current_colour;
+
+• Ran $p='src/term.c'; Get-Content $p | Select-Object -Skip 3560 -First 90 | % {$global:i=($global:i+1)} {"{0}:{1}"
+  │ -f (3560+$i),$_}
+  └ 3561:            struct emoji * ee = &e;
+    3561:            uint em = *(uint *)ee;
+    … +86 lines
+    3561:          }
+    3561:        }
+
+• Running rg -n "ATTR_FONTFAM_SHIFT|FONTFAM_MASK|findex == 11|fontfamilies\[11\]|FontRTL|TATTR_ZOOMFULL|0x2500|
+  │ 0x2588|E0B" src/term.c src/termout.c src/wintext.c src/config.c -S
+
+• Running $p='docs/mintty.1'; $start=1968; $count=40; $i=$start; Get-Content $p | Select-Object -Skip ($start-1)
+  │ -First $count | ForEach-Object {"$i`:$($_)"; $i++}
+
+• Ran rg -n "ATTR_FONTFAM_SHIFT|FONTFAM_MASK|findex == 11|fontfamilies\[11\]|FontRTL|TATTR_ZOOMFULL|0x2500|0x2588|
+  │ E0B" src/term.c src/termout.c src/wintext.c src/config.c -S
+  └ src/config.c:443:  {"FontRTL", OPT_WSTRING, offcfg(fontfams[11].name)},
+    src/config.c:444:  {"FontRTLWeight", OPT_INT, offcfg(fontfams[11].weight)},
+    … +89 lines
+    src/termout.c:5602:                term.curs.attr.attr &= ~FONTFAM_MASK;
+    src/termout.c:5603:                term.curs.attr.attr |= (cattrflags)14 << ATTR_FONTFAM_SHIFT;
+
+• Ran $p='wiki/Tips.md'; $start=1038; $count=30; $i=$start; Get-Content $p | Select-Object -Skip ($start-1) -First
+  │ $count | ForEach-Object {"$i`:$($_)"; $i++}
+  └ 1038:Font1=Jigmo
+    1039:Font2=Jigmo2
+    … +26 lines
+    1066:no mechanism to configure dynamic fonts explicitly. The number of font files
+    1067:should be limited to avoid significant startup delay.
+
+• Ran $p='docs/mintty.1'; $start=1968; $count=40; $i=$start; Get-Content $p | Select-Object -Skip ($start-1) -First
+  │ $count | ForEach-Object {"$i`:$($_)"; $i++}
+  └ 1968:selected font.
+    1969:When this option is set =1, the default set of ligatures is applied.
+    … +36 lines
+    2006:
+    2007:The major purpose of setting \fBLocale\fP, as far as the terminal is
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+• I’ve confirmed docs explicitly state self-drawing for box characters. I’m now verifying the exact runtime trigger
+  logic (BoxDrawing setting and Unicode ranges) so we can answer whether this is “smart fallback” vs deliberate
+  coercion.
+
+• Running $p='src/termout.c'; $start=5488; $count=90; $i=$start; Get-Content $p | Select-Object -Skip ($start-1)
+  │ -First $count | ForEach-Object {"$i`:$($_)"; $i++}
+
+• Running $p='src/wintext.c'; $start=4068; $count=220; $i=$start; Get-Content $p | Select-Object -Skip ($start-1)
+  │ -First $count | ForEach-Object {"$i`:$($_)"; $i++}
+
+• Ran $p='src/config.c'; $start=420; $count=40; $i=$start; Get-Content $p | Select-Object -Skip ($start-1) -First
+  │ $count | ForEach-Object {"$i`:$($_)"; $i++}
+  └ 420:  {"FontRender", OPT_FONTRENDER, offcfg(font_render)},
+    421:  {"FontMenu", OPT_INT, offcfg(fontmenu)},
+    … +36 lines
+    458:  {"FormatOtherKeys", OPT_INT, offcfg(format_other_keys)},
+    459:  {"AutoRepeat", OPT_BOOL, offcfg(auto_repeat)},
+
+• Ran $p='src/wintext.c'; $start=4068; $count=220; $i=$start; Get-Content $p | Select-Object -Skip ($start-1) -First
+  │ $count | ForEach-Object {"$i`:$($_)"; $i++}
+  └ 4068:      int yt = y + (cell_height - line_width) * 10 / 16;
+    4069:      int yb = y + (cell_height - line_width) * 8 / 16;
+    … +216 lines
+    4286:    {
+    4287:      int boxscale(int ref, char val)
+
+• Ran $p='src/termout.c'; $start=5488; $count=90; $i=$start; Get-Content $p | Select-Object -Skip ($start-1) -First
+  │ $count | ForEach-Object {"$i`:$($_)"; $i++}
+  └ 5488:          term.high_surrogate = wc;
+    5489:          continue;
+    … +90 lines
+    5576:                      wc = 0x23AA;         // 鈳帾
+    5577:                    when 0x23A8 or 0x23AC: // 鈳ㄢ幀
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+• I’ve identified the key reason your exact logo example looks seamless: those characters are in U+2580..U+259F
+  (Block Elements), and mintty routes that range to a self-drawn renderer, not ordinary font fallback. I’ll grab the
+  final confirming snippets and summarize the mechanism clearly.
+
+• Running $p='src/wintext.c'; $start=4488; $count=40; $i=$start; Get-Content $p | Select-Object -Skip ($start-1)
+  │ -First $count | ForEach-Object {"$i`:$($_)"; $i++}
+
+• Ran rg -n "BoxDrawing|box_drawing|U\+2500|U\+259F|0x2580|0x259F" src/config.c src/config.h src/wintext.c src/
+  │ termout.c docs/mintty.1 -S
+  └ src/config.h:260:  bool box_drawing;
+    docs/mintty.1:1978:\fBBox Drawing\fP (BoxDrawing=1)
+    … +13 lines
+    src/config.c:271:  .box_drawing = 1,
+    src/config.c:627:  {"BoxDrawing", OPT_BOOL, offcfg(box_drawing)},
+
+• Ran $p='src/wintext.c'; $start=4488; $count=40; $i=$start; Get-Content $p | Select-Object -Skip ($start-1) -First
+  │ $count | ForEach-Object {"$i`:$($_)"; $i++}
+  └ 4488:          lines(0, 0, 8, 8, -1, -1);
+    4489:        when 0xE0BA:
+    … +36 lines
+    4526:        when 0x259D: rect(4, 0, 8, 4);
+    4527:        when 0x259E: rect(4, 0, 8, 4); rect(0, 4, 4, 8);
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+• Short answer: yes and no.
+
+  It is not mainly a “smart fallback coercion” system for those block/logo glyphs. For the ranges you’re noticing,
+  mintty often bypasses font glyphs and draws them itself so cells connect cleanly.
+
+  Key evidence from this repo:
+
+  - In output processing, those chars are marked for special rendering (FONTFAM=11):
+      - src/termout.c:5515
+      - src/termout.c:5521
+  - That includes:
+      - Box Drawing U+2500..U+257F (when BoxDrawing is on)
+      - Block Elements U+2580..U+259F (always in this path)
+      - Powerline private-use symbols U+E0B0..U+E0BF (except two)
+  - Renderer treats this as self-drawn graphics (boxpower) instead of normal font text:
+      - src/wintext.c:3114
+      - src/wintext.c:4083
+  - Concrete block-element drawing code (rectangles/shades, etc.):
+      - src/wintext.c:4502
+      - src/wintext.c:4504
+
+  Docs explicitly confirm this design:
+
+  - docs/mintty.1:1978 says BoxDrawing enables self-drawn box graphics for unbroken connections.
+  - wiki/Tips.md:1045 says mintty draws box-drawing characters itself for seamless rendering.
+
+  So for a logo like ▐▛███▜▌, the “almost perfect/no gaps” behavior is primarily from mintty’s special self-draw
+  path (plus zoom/full-cell handling), not from ordinary fallback font matching. Normal Windows fallback/font
+  linking still exists for other characters, but this specific effect is mostly deliberate custom rendering.
+
+
+› Write tests for @filename
+
+  gpt-5.3-codex medium · 85% left · ~\Downloads\mintty-master
