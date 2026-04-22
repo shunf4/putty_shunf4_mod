@@ -1633,15 +1633,6 @@ static void init_fonts(WinGuiSeat *wgs, int pick_width, int pick_height)
         OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, FONT_QUALITY(quality), \
         FIXED_PITCH | FF_DONTCARE, font->name)
 
-    /*
-     * Save the original CreateFont parameters before GetTextMetrics
-     * overwrites font_height/font_width.  We need these to recreate
-     * FONT_NORMAL with the correct sign convention (negative height
-     * means character height; positive means cell height).
-     */
-    int orig_create_h = wgs->font_height;
-    int orig_create_w = wgs->font_width;
-
     f(FONT_NORMAL, font->charset, fw_dontcare, false);
 
     SelectObject(hdc, wgs->fonts[FONT_NORMAL]);
@@ -1679,33 +1670,6 @@ static void init_fonts(WinGuiSeat *wgs, int pick_width, int pick_height)
         wgs->font_width = get_font_width(wgs, hdc, &tm);
     }
 
-    /*
-     * Recreate FONT_NORMAL slightly taller than the cell so that
-     * glyphs overlap the next row by ~1 pixel.  This eliminates
-     * visible vertical gaps from internal leading, ClearType edge
-     * effects, or DPI rounding — without special-casing any
-     * character range.
-     *
-     * We must preserve the original CreateFont sign convention:
-     * negative height = character height, positive = cell height.
-     * Using tmHeight (positive) in place of a negative original would
-     * flip character-height into cell-height and crush the glyphs.
-     * Width is kept at the original value (0 = auto) so the font
-     * mapper preserves the natural aspect ratio.
-     */
-    {
-        int new_h = orig_create_h;
-        if (new_h < 0) new_h -= 1;   /* -19 → -20 */
-        else           new_h += 1;   /*  22 →  23 */
-
-        DeleteObject(wgs->fonts[FONT_NORMAL]);
-        wgs->fonts[FONT_NORMAL] = CreateFont(
-            new_h, orig_create_w, 0, 0, fw_dontcare, false, false, false,
-            font->charset, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-            FONT_QUALITY(quality), FIXED_PITCH | FF_DONTCARE, font->name);
-        SelectObject(hdc, wgs->fonts[FONT_NORMAL]);
-    }
-
     {
         CHARSETINFO info;
         DWORD cset = tm.tmCharSet;
@@ -1724,17 +1688,7 @@ static void init_fonts(WinGuiSeat *wgs, int pick_width, int pick_height)
         wgs->ucsdata.dbcs_screenfont = (cpinfo.MaxCharSize > 1);
     }
 
-    {
-        /* Increase height only for FONT_UNDERLINE / FONT_BOLD;
-         * keep original width to preserve glyph proportions */
-        int save_h = wgs->font_height;
-        wgs->font_height = save_h + 1;
-        f(FONT_UNDERLINE, font->charset, fw_dontcare, true);
-        if (wgs->bold_font_mode == BOLD_FONT) {
-            f(FONT_BOLD, font->charset, fw_bold, false);
-        }
-        wgs->font_height = save_h;
-    }
+    f(FONT_UNDERLINE, font->charset, fw_dontcare, true);
 
     /*
      * Some fonts, e.g. 9-pt Courier, draw their underlines
@@ -1786,12 +1740,8 @@ static void init_fonts(WinGuiSeat *wgs, int pick_width, int pick_height)
         }
     }
 
-    if (wgs->bold_font_mode == BOLD_FONT &&
-        !wgs->fonts[FONT_BOLD]) {
-        int save_h = wgs->font_height;
-        wgs->font_height = save_h + 1;
+    if (wgs->bold_font_mode == BOLD_FONT) {
         f(FONT_BOLD, font->charset, fw_bold, false);
-        wgs->font_height = save_h;
     }
 #undef f
 
@@ -1853,7 +1803,7 @@ static void init_fonts(WinGuiSeat *wgs, int pick_width, int pick_height)
         wgs->fallback_font_count = 0;
         for (int fi = 0; fi < FALLBACK_FONTS_MAX; fi++) {
             wgs->fonts_fallback[fi] = CreateFontW(
-                wgs->font_height + 1, wgs->font_width, 0, 0, FW_DONTCARE,
+                wgs->font_height, wgs->font_width, 0, 0, FW_DONTCARE,
                 false, false, false, DEFAULT_CHARSET,
                 OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
                 FONT_QUALITY(quality),
@@ -1911,20 +1861,11 @@ static void another_font(WinGuiSeat *wgs, int fontno)
 
     quality = conf_get_int(wgs->conf, CONF_font_quality);
 
-    {
-        /*
-         * Create font 1 pixel taller than the cell for seamless
-         * vertical tiling (same as in init_fonts for the primary fonts).
-         */
-        int h = wgs->font_height;
-        if (fontno & FONT_HIGH)
-            h *= 2;
-        wgs->fonts[fontno] =
-            CreateFont(h + 1, x, 0, 0, w,
-                       false, u, false, c, OUT_DEFAULT_PRECIS,
-                       CLIP_DEFAULT_PRECIS, FONT_QUALITY(quality),
-                       DEFAULT_PITCH | FF_DONTCARE, s);
-    }
+    wgs->fonts[fontno] =
+        CreateFont(wgs->font_height * (1 + !!(fontno & FONT_HIGH)), x, 0, 0, w,
+                   false, u, false, c, OUT_DEFAULT_PRECIS,
+                   CLIP_DEFAULT_PRECIS, FONT_QUALITY(quality),
+                   DEFAULT_PITCH | FF_DONTCARE, s);
 
     wgs->fontflag[fontno] = true;
 }
