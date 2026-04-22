@@ -3641,6 +3641,20 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT message,
                                    TO_CHR_Y(p.y), shift_pressed,
                                    control_pressed, is_alt_pressed());
                     } /* else: not sure when this can fail */
+                } else if (wgs->term->alt_which &&
+                           message != WM_MOUSEHWHEEL) {
+                    /*
+                     * In alternate screen buffer (e.g. vim, less), there
+                     * is no scrollback, so translate mouse wheel into
+                     * arrow key events instead of scrolling.
+                     */
+                    char abuf[32];
+                    int alen = format_arrow_key(
+                        abuf, wgs->term,
+                        b == MBT_WHEEL_UP ? 'A' : 'B',
+                        false, false, false, NULL);
+                    for (int ci = 0; ci < 3; ci++)
+                        term_keyinput(wgs->term, -1, abuf, alen);
                 } else if (message != WM_MOUSEHWHEEL) {
                     /* trigger a scroll */
                     term_scroll(wgs->term, 0,
