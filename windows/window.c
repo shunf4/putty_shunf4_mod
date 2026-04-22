@@ -1425,7 +1425,7 @@ static bool text_has_glyph(HDC hdc, const WCHAR *str, int len)
     WORD idx;
     if (GetGlyphIndicesW(hdc, str, len, &idx,
                          GGI_MARK_NONEXISTING_GLYPHS) == GDI_ERROR)
-        return true;  /* assume glyph exists if API fails */
+        return false;
     return idx != 0xFFFF && idx != 0;
 }
 
