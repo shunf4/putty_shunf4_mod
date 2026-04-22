@@ -5865,6 +5865,7 @@ static HRESULT STDMETHODCALLTYPE drop_Drop(
         *pdwEffect = DROPEFFECT_COPY;
         SetForegroundWindow(wgs->term_hwnd);
     }
+    return S_OK;
 }
 
 static const IDropTargetVtbl drop_vtbl = {
