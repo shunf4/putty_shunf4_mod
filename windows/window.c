@@ -21,6 +21,7 @@
 #include "putty-rc.h"
 #include "security-api.h"
 #include "win-gui-seat.h"
+#include "emoji_render.h"
 #include "tree234.h"
 
 #ifdef NO_MULTIMON
@@ -1562,6 +1563,19 @@ static void init_dpi_info(WinGuiSeat *wgs)
     }
 }
 
+static const WCHAR *const fallback_names[] = {
+    // L"Segoe UI Symbol",
+    // L"Cambria Math",
+    // L"Arial Unicode MS",
+    // L"DejaVu Sans",
+    L"Twitter Color Emoji",
+    L"Noto Color Emoji",
+    L"Dejavu Sans Mono",
+    L"Noto Sans Mono",
+    L"Segoe UI",
+    L"Lucida Sans Unicode",
+};
+
 /*
  * Initialise all the fonts we will need initially. There may be as many as
  * three or as few as one.  The other (potentially) twenty-one fonts are done
@@ -1789,17 +1803,6 @@ static void init_fonts(WinGuiSeat *wgs, int pick_width, int pick_height)
 
     /* Create fallback fonts for characters not in the main font */
     {
-        static const WCHAR *const fallback_names[] = {
-            // L"Segoe UI Symbol",
-            // L"Cambria Math",
-            // L"Arial Unicode MS",
-            // L"DejaVu Sans",
-            L"Dejavu Sans Mono",
-            L"Noto Sans Mono",
-            L"Segoe UI",
-            L"Segoe UI Symbol",
-            L"Lucida Sans Unicode",
-        };
         wgs->fallback_font_count = 0;
         for (int fi = 0; fi < FALLBACK_FONTS_MAX; fi++) {
             wgs->fonts_fallback[fi] = CreateFontW(
@@ -1814,6 +1817,10 @@ static void init_fonts(WinGuiSeat *wgs, int pick_width, int pick_height)
                 break;
         }
     }
+
+    emoji_renderer_init();
+    emoji_renderer_set_fonts(fallback_names,
+                             wgs->fallback_font_count);
 }
 
 static void another_font(WinGuiSeat *wgs, int fontno)
@@ -1873,6 +1880,9 @@ static void another_font(WinGuiSeat *wgs, int fontno)
 static void deinit_fonts(WinGuiSeat *wgs)
 {
     int i;
+
+    emoji_renderer_cleanup();
+
     for (i = 0; i < FONT_MAXNO; i++) {
         if (wgs->fonts[i])
             DeleteObject(wgs->fonts[i]);
@@ -4106,12 +4116,12 @@ static void do_text_internal(
             }
 
             /*
-             * Font fallback: overdraw missing glyphs with a fallback
-             * font.  We first render everything with the main font
+             * Font fallback + color emoji: overdraw missing glyphs.
+             * We first render everything with the main font
              * (which draws boxes for missing glyphs), then overdraw
              * only the missing ones here.
              */
-            if (wgs->fallback_font_count > 0) {
+            {
                 WORD *glyph_idx = snewn(len, WORD);
                 SelectObject(wgs->wintw_hdc, wgs->fonts[nfont]);
                 GetGlyphIndicesW(wgs->wintw_hdc, wbuf, len,
@@ -4121,16 +4131,67 @@ static void do_text_internal(
                     int clen = 1;
                     if (i + 1 < len && IS_SURROGATE_PAIR(wbuf[i], wbuf[i+1]))
                         clen = 2;
-                    if (glyph_idx[i] == 0xFFFF || glyph_idx[i] == 0) {
+
+                    /* Decode codepoint (handle surrogate pairs) */
+                    unsigned int uc = wbuf[i];
+                    if (clen == 2 && i + 1 < len &&
+                        IS_SURROGATE_PAIR(wbuf[i], wbuf[i+1]))
+                        uc = ((unsigned)(wbuf[i] - 0xD800) << 10)
+                             + (wbuf[i+1] - 0xDC00) + 0x10000;
+
+                    /* Compute position for this segment */
+                    int x_seg = x + xoffset;
+                    for (int k = 0; k < i; k++)
+                        x_seg += lpDx[k];
+                    int cw = 0;
+                    for (int k = 0; k < clen; k++)
+                        cw += lpDx[i + k];
+                    int ch = wgs->font_height;
+                    if (lattr == LATTR_TOP || lattr == LATTR_BOT)
+                        ch *= 2;
+
+                    /* Regional Indicator pair (flag emoji):
+                     * two adjacent RIs must be sent together so that
+                     * DirectWrite can apply the flag ligature. */
+                    int pair_extra = 0;
+                    if (uc >= 0x1F1E6 && uc <= 0x1F1FF) {
+                        int ni = i + clen;
+                        if (ni + 1 < len &&
+                            IS_SURROGATE_PAIR(wbuf[ni], wbuf[ni+1])) {
+                            unsigned int uc2 =
+                                ((unsigned)(wbuf[ni] - 0xD800) << 10)
+                                + (wbuf[ni+1] - 0xDC00) + 0x10000;
+                            if (uc2 >= 0x1F1E6 && uc2 <= 0x1F1FF) {
+                                pair_extra = 2;
+                            }
+                        }
+                    }
+
+                    /* Try colour-emoji rendering for ALL emoji candidates,
+                     * even if the main font has a monochrome glyph. */
+                    bool emoji_done = false;
+                    if (emoji_is_color_candidate(uc)) {
+                        emoji_done = emoji_render_color(
+                            wgs->wintw_hdc, x_seg,
+                            y - wgs->font_height *
+                                (lattr == LATTR_BOT) + text_adjust,
+                            cw, ch, &wbuf[i], clen + pair_extra,
+                            wgs->font_height, fg, bg);
+                    }
+
+                    if (emoji_done && pair_extra > 0) {
+                        /* Flag emoji rendered both RIs; skip the 2nd */
+                        i += clen + pair_extra;
+                        continue;
+                    }
+
+                    /* GDI font fallback for missing non-emoji glyphs */
+                    if (!emoji_done &&
+                        (glyph_idx[i] == 0xFFFF || glyph_idx[i] == 0) &&
+                        wgs->fallback_font_count > 0) {
                         HFONT fb = find_fallback_font(
                             wgs, wgs->wintw_hdc, &wbuf[i], clen);
                         if (fb) {
-                            int x_seg = x + xoffset;
-                            for (int k = 0; k < i; k++)
-                                x_seg += lpDx[k];
-                            /* Erase the box glyph and redraw with
-                             * fallback: ETO_OPAQUE fills the per-char
-                             * rect with BkColor first. */
                             RECT char_box;
                             char_box.left = x_seg;
                             char_box.top = line_box.top;

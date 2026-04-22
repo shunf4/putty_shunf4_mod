@@ -99,6 +99,15 @@ add_dependencies(psftp generated_licence_h)
 
 add_sources_from_current_dir(psocks nohelp.c)
 
+# C++ static library for color emoji rendering (only file built as C++)
+enable_language(CXX)
+string(REPLACE "/DNDEBUG" "" CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE}")
+string(REPLACE "-DNDEBUG" "" CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE}")
+string(REPLACE "/DNDEBUG" "" CMAKE_CXX_FLAGS_RELWITHDEBINFO "${CMAKE_CXX_FLAGS_RELWITHDEBINFO}")
+string(REPLACE "-DNDEBUG" "" CMAKE_CXX_FLAGS_RELWITHDEBINFO "${CMAKE_CXX_FLAGS_RELWITHDEBINFO}")
+add_library(emoji_render STATIC emoji_render.cpp)
+set_target_properties(emoji_render PROPERTIES LINKER_LANGUAGE CXX)
+
 add_executable(putty
   window.c
   putty.c
@@ -108,6 +117,7 @@ add_executable(putty
 be_list(putty PuTTY SSH SERIAL OTHERBACKENDS)
 add_dependencies(putty generated_licence_h)
 target_link_libraries(putty
+  emoji_render
   guiterminal guimisc eventloop sshclient otherbackends settings network crypto
   utils
   ${platform_libraries})
@@ -129,6 +139,7 @@ add_executable(puttytel
 be_list(puttytel PuTTYtel SERIAL OTHERBACKENDS)
 add_dependencies(puttytel generated_licence_h)
 target_link_libraries(puttytel
+  emoji_render
   guiterminal guimisc eventloop otherbackends settings network utils
   ${platform_libraries})
 set_target_properties(puttytel PROPERTIES WIN32_EXECUTABLE ON)
@@ -168,6 +179,7 @@ if(HAVE_CONPTY)
   be_list(pterm pterm)
   add_dependencies(pterm generated_licence_h)
   target_link_libraries(pterm
+    emoji_render
     guiterminal guimisc eventloop settings network utils
     ${platform_libraries})
   set_target_properties(pterm PROPERTIES WIN32_EXECUTABLE ON)
