@@ -5,7 +5,7 @@
                         OutputDebugStringA(abc);
                     } 
 
-
+taskkill /f /im pterm.exe ; cmake --build . --config Release
 
 
 PuTTY source code README
