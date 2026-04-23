@@ -1414,31 +1414,7 @@ static void exact_textout(HDC hdc, int x, int y, CONST RECT *lprc,
                lprc, buffer, cbCount, lpDx);
 }
 
-/*
- * Font fallback helpers: detect missing glyphs and find a fallback
- * font that contains them, so that Unicode characters (e.g. math
- * symbols) not present in the user's chosen font can still be
- * displayed instead of showing a box.
- */
-static bool text_has_glyph(HDC hdc, const WCHAR *str, int len)
-{
-    WORD idx;
-    if (GetGlyphIndicesW(hdc, str, len, &idx,
-                         GGI_MARK_NONEXISTING_GLYPHS) == GDI_ERROR)
-        return false;
-    return idx != 0xFFFF && idx != 0;
-}
 
-static HFONT find_fallback_font(WinGuiSeat *wgs, HDC hdc,
-                                 const WCHAR *str, int len)
-{
-    for (int i = 0; i < wgs->fallback_font_count; i++) {
-        SelectObject(hdc, wgs->fonts_fallback[i]);
-        if (text_has_glyph(hdc, str, len))
-            return wgs->fonts_fallback[i];
-    }
-    return NULL;
-}
 
 /*
  * The exact_textout() wrapper, unfortunately, destroys the useful
@@ -1786,34 +1762,6 @@ static void init_fonts(WinGuiSeat *wgs, int pick_width, int pick_height)
     wgs->fontflag[2] = true;
 
     init_ucs(wgs->conf, &wgs->ucsdata);
-
-    /* Create fallback fonts for characters not in the main font */
-    {
-        static const WCHAR *const fallback_names[] = {
-            // L"Segoe UI Symbol",
-            // L"Cambria Math",
-            // L"Arial Unicode MS",
-            // L"DejaVu Sans",
-            L"Dejavu Sans Mono",
-            L"Noto Sans Mono",
-            L"Segoe UI",
-            L"Segoe UI Symbol",
-            L"Lucida Sans Unicode",
-        };
-        wgs->fallback_font_count = 0;
-        for (int fi = 0; fi < FALLBACK_FONTS_MAX; fi++) {
-            wgs->fonts_fallback[fi] = CreateFontW(
-                wgs->font_height, wgs->font_width, 0, 0, FW_DONTCARE,
-                false, false, false, DEFAULT_CHARSET,
-                OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-                FONT_QUALITY(quality),
-                FIXED_PITCH | FF_DONTCARE, fallback_names[fi]);
-            if (wgs->fonts_fallback[fi])
-                wgs->fallback_font_count++;
-            else
-                break;
-        }
-    }
 }
 
 static void another_font(WinGuiSeat *wgs, int fontno)
@@ -1879,13 +1827,6 @@ static void deinit_fonts(WinGuiSeat *wgs)
         wgs->fonts[i] = 0;
         wgs->fontflag[i] = false;
     }
-
-    for (i = 0; i < wgs->fallback_font_count; i++) {
-        if (wgs->fonts_fallback[i])
-            DeleteObject(wgs->fonts_fallback[i]);
-        wgs->fonts_fallback[i] = NULL;
-    }
-    wgs->fallback_font_count = 0;
 
     if (trust_icon != INVALID_HANDLE_VALUE) {
         DestroyIcon(trust_icon);
@@ -4103,59 +4044,6 @@ static void do_text_internal(
                     y - wgs->font_height * (lattr == LATTR_BOT) + text_adjust,
                     ETO_CLIPPED, &line_box, wbuf, len,
                     (use_lpDx ? lpDx : NULL));
-            }
-
-            /*
-             * Font fallback: overdraw missing glyphs with a fallback
-             * font.  We first render everything with the main font
-             * (which draws boxes for missing glyphs), then overdraw
-             * only the missing ones here.
-             */
-            if (wgs->fallback_font_count > 0) {
-                WORD *glyph_idx = snewn(len, WORD);
-                SelectObject(wgs->wintw_hdc, wgs->fonts[nfont]);
-                GetGlyphIndicesW(wgs->wintw_hdc, wbuf, len,
-                                 glyph_idx, GGI_MARK_NONEXISTING_GLYPHS);
-                SetBkMode(wgs->wintw_hdc, TRANSPARENT);
-                for (int i = 0; i < len; ) {
-                    int clen = 1;
-                    if (i + 1 < len && IS_SURROGATE_PAIR(wbuf[i], wbuf[i+1]))
-                        clen = 2;
-                    if (glyph_idx[i] == 0xFFFF || glyph_idx[i] == 0) {
-                        HFONT fb = find_fallback_font(
-                            wgs, wgs->wintw_hdc, &wbuf[i], clen);
-                        if (fb) {
-                            int x_seg = x + xoffset;
-                            for (int k = 0; k < i; k++)
-                                x_seg += lpDx[k];
-                            /* Erase the box glyph and redraw with
-                             * fallback: ETO_OPAQUE fills the per-char
-                             * rect with BkColor first. */
-                            RECT char_box;
-                            char_box.left = x_seg;
-                            char_box.top = line_box.top;
-                            char_box.bottom = line_box.bottom;
-                            char_box.right = x_seg;
-                            for (int k = 0; k < clen; k++)
-                                char_box.right += lpDx[i + k];
-                            SetBkColor(wgs->wintw_hdc, bg);
-                            SetBkMode(wgs->wintw_hdc, OPAQUE);
-                            SelectObject(wgs->wintw_hdc, fb);
-                            ExtTextOutW(
-                                wgs->wintw_hdc, x_seg,
-                                y - wgs->font_height *
-                                    (lattr == LATTR_BOT) + text_adjust,
-                                ETO_CLIPPED | ETO_OPAQUE, &char_box,
-                                &wbuf[i], clen,
-                                wgs->font_varpitch ? NULL : lpDx + i);
-                            SetBkMode(wgs->wintw_hdc, TRANSPARENT);
-                            SelectObject(wgs->wintw_hdc,
-                                         wgs->fonts[nfont]);
-                        }
-                    }
-                    i += clen;
-                }
-                sfree(glyph_idx);
             }
         }
 
