@@ -1570,9 +1570,11 @@ static const WCHAR *const fallback_names[] = {
     // L"DejaVu Sans",
     L"Twitter Color Emoji",
     L"Noto Color Emoji",
+
     L"Dejavu Sans Mono",
     L"Noto Sans Mono",
     L"Segoe UI",
+    L"Segoe UI Symbol",
     L"Lucida Sans Unicode",
 };
 
