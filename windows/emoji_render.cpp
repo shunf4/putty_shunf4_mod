@@ -148,7 +148,8 @@ extern "C" bool emoji_is_color_candidate(unsigned int uc)
         (uc >= 0x1FA00 && uc <= 0x1FAFF) ||   /* Extended-A           */
         (uc >= 0x1F000 && uc <= 0x1F0FF) ||   /* Mahjong / Cards      */
         (uc >= 0x1F1E6 && uc <= 0x1F1FF) ||   /* Regional Indicators  */
-        (uc >= 0x2600  && uc <= 0x26FF);       /* Misc Symbols         */
+        (uc >= 0x2600  && uc <= 0x26FF)  ||   /* Misc Symbols         */
+        (uc >= 0x2700  && uc <= 0x27BF);      /* Dingbats             */
 }
 
 extern "C" bool emoji_render_color(
@@ -163,7 +164,7 @@ extern "C" bool emoji_render_color(
     //         char abc[300];sprintf(abc, "eee char %ld, %ld, len=%d, w=%d", (*text), (len<2?0:text[1]), len, w);
     //         OutputDebugStringA(abc);
     //     } 
-    if (len == 2 && text[0] >= 0x2600  && text[0] <= 0x26FF && text[1] == 0xFE0E) {
+    if (len == 2 && (text[0] >= 0x2600  && text[0] <= 0x26FF || text[0] >= 0x2700  && text[0] <= 0x27BF) && text[1] == 0xFE0E) {
         // Misc Symbols + VarSel Text
         return false;
     }
@@ -197,14 +198,14 @@ extern "C" bool emoji_render_color(
 
     if (brush) {
         
-        if (len == 1 && text[0] >= 0x2600  && text[0] <= 0x26FF) {
+        if (len == 1 && (text[0] >= 0x2600  && text[0] <= 0x26FF || text[0] >= 0x2700  && text[0] <= 0x27BF)) {
             // Misc Symbols
             // Almost wont hit? Misc Symbols most of the time comes with a VarSel
             for_misc_symbols_add_var_sel_fe0f[0] = text[0];
             for_misc_symbols_add_var_sel_fe0f[1] = L'\xDE00';
             text = for_misc_symbols_add_var_sel_fe0f;
             len = 2;
-        } else if (len == 2 && text[0] >= 0x2600  && text[0] <= 0x26FF && text[1] == 0xFE0F) {
+        } else if (len == 2 && (text[0] >= 0x2600  && text[0] <= 0x26FF || text[0] >= 0x2700  && text[0] <= 0x27BF) && text[1] == 0xFE0F) {
             // Misc Symbols + VarSel Emoji
             // go on
         }
