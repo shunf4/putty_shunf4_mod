@@ -4139,21 +4139,13 @@ static void do_text_internal(
                         uc = ((unsigned)(wbuf[i] - 0xD800) << 10)
                              + (wbuf[i+1] - 0xDC00) + 0x10000;
 
-                    /* Compute position for this segment */
-                    int x_seg = x + xoffset;
-                    for (int k = 0; k < i; k++)
-                        x_seg += lpDx[k];
-                    int cw = 0;
-                    for (int k = 0; k < clen; k++)
-                        cw += lpDx[i + k];
-                    int ch = wgs->font_height;
-                    if (lattr == LATTR_TOP || lattr == LATTR_BOT)
-                        ch *= 2;
+                    boolean special_emoji = false;
+                    int special_emoji_clen_modifier_for_width = 0;
+                    int special_emoji_clen_modifier_for_exttextout = 0;
 
                     /* Regional Indicator pair (flag emoji):
                      * two adjacent RIs must be sent together so that
                      * DirectWrite can apply the flag ligature. */
-                    int pair_extra = 0;
                     if (uc >= 0x1F1E6 && uc <= 0x1F1FF) {
                         int ni = i + clen;
                         if (ni + 1 < len &&
@@ -4162,11 +4154,43 @@ static void do_text_internal(
                                 ((unsigned)(wbuf[ni] - 0xD800) << 10)
                                 + (wbuf[ni+1] - 0xDC00) + 0x10000;
                             if (uc2 >= 0x1F1E6 && uc2 <= 0x1F1FF) {
-                                pair_extra = 2;
+                                clen += 2;
+                                special_emoji = true;
+                                special_emoji_clen_modifier_for_width -= 2;
                             }
                         }
                     }
 
+                    /* Varsel: [Hot Beverage] + [Variable Selector] -> emoji/text */
+                    {
+                        int ni = i + clen;
+                        if (ni < len &&
+                            IS_LOW_VARSEL(wbuf[ni])) {
+                            clen += 1;
+                            special_emoji = true;
+                            special_emoji_clen_modifier_for_exttextout += -1;
+                        }
+                        if (ni + 1 < len &&
+                            IS_HIGH_VARSEL(wbuf[ni], wbuf[ni+1])) {
+                            clen += 2;
+                            special_emoji = true;
+                            special_emoji_clen_modifier_for_exttextout += -2;
+                        }
+                    }
+
+                    /* Compute position for this segment */
+                    int x_seg = x + xoffset;
+                    for (int k = 0; k < i; k++) {
+                        x_seg += lpDx[k];
+                    }
+                    int cw = 0;
+                    for (int k = 0; k < (clen + special_emoji_clen_modifier_for_width); k++) {
+                        cw += lpDx[i + k];
+                    }
+                    int ch = wgs->font_height;
+                    if (lattr == LATTR_TOP || lattr == LATTR_BOT)
+                        ch *= 2;
+                    
                     /* Try colour-emoji rendering for ALL emoji candidates,
                      * even if the main font has a monochrome glyph. */
                     bool emoji_done = false;
@@ -4175,13 +4199,12 @@ static void do_text_internal(
                             wgs->wintw_hdc, x_seg,
                             y - wgs->font_height *
                                 (lattr == LATTR_BOT) + text_adjust,
-                            cw, ch, &wbuf[i], clen + pair_extra,
+                            cw, ch, &wbuf[i], clen,
                             wgs->font_height, fg, bg);
                     }
 
-                    if (emoji_done && pair_extra > 0) {
-                        /* Flag emoji rendered both RIs; skip the 2nd */
-                        i += clen + pair_extra;
+                    if (emoji_done && special_emoji) {
+                        i += clen;
                         continue;
                     }
 
@@ -4190,14 +4213,14 @@ static void do_text_internal(
                         (glyph_idx[i] == 0xFFFF || glyph_idx[i] == 0) &&
                         wgs->fallback_font_count > 0) {
                         HFONT fb = find_fallback_font(
-                            wgs, wgs->wintw_hdc, &wbuf[i], clen);
+                            wgs, wgs->wintw_hdc, &wbuf[i], (clen + special_emoji_clen_modifier_for_exttextout));
                         if (fb) {
                             RECT char_box;
                             char_box.left = x_seg;
                             char_box.top = line_box.top;
                             char_box.bottom = line_box.bottom;
                             char_box.right = x_seg;
-                            for (int k = 0; k < clen; k++)
+                            for (int k = 0; k < (clen + special_emoji_clen_modifier_for_exttextout); k++)
                                 char_box.right += lpDx[i + k];
                             SetBkColor(wgs->wintw_hdc, bg);
                             SetBkMode(wgs->wintw_hdc, OPAQUE);
@@ -4207,7 +4230,7 @@ static void do_text_internal(
                                 y - wgs->font_height *
                                     (lattr == LATTR_BOT) + text_adjust,
                                 ETO_CLIPPED | ETO_OPAQUE, &char_box,
-                                &wbuf[i], clen,
+                                &wbuf[i], (clen + special_emoji_clen_modifier_for_exttextout),
                                 wgs->font_varpitch ? NULL : lpDx + i);
                             SetBkMode(wgs->wintw_hdc, TRANSPARENT);
                             SelectObject(wgs->wintw_hdc,

@@ -12,6 +12,7 @@
 
 #include "emoji_render.h"
 
+#include <stdio.h>
 #include <dwrite.h>
 #include <d2d1.h>
 
@@ -155,7 +156,17 @@ extern "C" bool emoji_render_color(
     const wchar_t *text, int len,
     int font_height_px, COLORREF fg, COLORREF bg)
 {
+    static wchar_t for_misc_symbols_add_var_sel_fe0f[2] = { '\x0000', '\x0000' };
     if (!g_rt || !g_dw) return false;
+
+    // {
+    //         char abc[300];sprintf(abc, "eee char %ld, %ld, len=%d, w=%d", (*text), (len<2?0:text[1]), len, w);
+    //         OutputDebugStringA(abc);
+    //     } 
+    if (len == 2 && text[0] >= 0x2600  && text[0] <= 0x26FF && text[1] == 0xFE0E) {
+        // Misc Symbols + VarSel Text
+        return false;
+    }
 
     /* Convert pixel height to DIPs for DirectWrite */
     int dpi = GetDeviceCaps(hdc, LOGPIXELSY);
@@ -185,6 +196,18 @@ extern "C" bool emoji_render_color(
             GetBValue(fg) / 255.0f, 1.0f), &brush);
 
     if (brush) {
+        
+        if (len == 1 && text[0] >= 0x2600  && text[0] <= 0x26FF) {
+            // Misc Symbols
+            // Almost wont hit? Misc Symbols most of the time comes with a VarSel
+            for_misc_symbols_add_var_sel_fe0f[0] = text[0];
+            for_misc_symbols_add_var_sel_fe0f[1] = L'\xDE00';
+            text = for_misc_symbols_add_var_sel_fe0f;
+            len = 2;
+        } else if (len == 2 && text[0] >= 0x2600  && text[0] <= 0x26FF && text[1] == 0xFE0F) {
+            // Misc Symbols + VarSel Emoji
+            // go on
+        }
         g_rt->DrawText(
             text, len, fmt,
             D2D1::RectF(0.0f, 0.0f, (float)w, (float)h),
@@ -192,7 +215,8 @@ extern "C" bool emoji_render_color(
             D2D1_DRAW_TEXT_OPTIONS_ENABLE_COLOR_FONT,
             DWRITE_MEASURING_MODE_NATURAL);
         brush->Release();
+        return SUCCEEDED(g_rt->EndDraw());
     }
 
-    return SUCCEEDED(g_rt->EndDraw());
+    return false;
 }
