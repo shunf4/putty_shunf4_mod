@@ -1,3 +1,13 @@
+
+
+{
+                        char abc[300];sprintf(abc, "eee char %ld, len=%d", (*text), len);
+                        OutputDebugStringA(abc);
+                    } 
+
+taskkill /f /im pterm.exe ; cmake --build . --config Release
+
+
 PuTTY source code README
 ========================
 
