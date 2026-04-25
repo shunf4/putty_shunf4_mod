@@ -112,6 +112,13 @@ Common overrides:
     -o MousePaste=implicit     Mouse paste mode
     -o MouseAutocopy=true      Auto-copy selected text
 
+  Zoom (in windowed mode zoom resizes the window; in maximized or
+  fullscreen mode zoom adjusts terminal columns/rows to fill the screen):
+    Ctrl+Scroll Up/Down        Zoom font size in/out
+    Ctrl+Shift++               Zoom in  (Ctrl+Shift+= on US keyboard)
+    Ctrl+Shift+-               Zoom out (Ctrl+Shift+_ on US keyboard)
+    Ctrl+0                     Reset font to default size
+
   Bell / indication:
     -o BeepInd=0               Bell indication mode:
                                  0 / B_IND_DISABLED = no indication
