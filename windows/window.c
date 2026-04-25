@@ -108,6 +108,8 @@ static void init_fonts(WinGuiSeat *wgs, int, int);
 static void init_dpi_info(WinGuiSeat *wgs);
 static void another_font(WinGuiSeat *wgs, int);
 static void deinit_fonts(WinGuiSeat *wgs);
+static void zoom_font(WinGuiSeat *wgs, int step);
+static void recompute_window_offset(WinGuiSeat *wgs);
 static void set_input_locale(WinGuiSeat *wgs, HKL);
 static void update_savedsess_menu(WinGuiSeat *wgs);
 static void init_winfuncs(void);
@@ -841,6 +843,13 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
     wgs->lastact = MA_NOTHING;
     wgs->lastbtn = MBT_NOTHING;
     wgs->dbltime = GetDoubleClickTime();
+    /*
+     * Cap the double-click threshold at 400ms. The Windows default
+     * (500ms) is too generous and causes false double-click detection
+     * when the user quickly dismisses a selection and starts a new one.
+     */
+    if (wgs->dbltime > 400)
+        wgs->dbltime = 400;
 
     /*
      * Set up the session-control options on the system menu.
@@ -1893,6 +1902,101 @@ static void deinit_fonts(WinGuiSeat *wgs)
     trust_icon = INVALID_HANDLE_VALUE;
 }
 
+/*
+ * Recreate the caret bitmap to match the current font dimensions.
+ */
+static void recreate_caret_bitmap(WinGuiSeat *wgs)
+{
+    char *bits;
+    int bmsize = (wgs->font_width + 15) / 16 * 2 * wgs->font_height;
+    if (wgs->caretbm)
+        DeleteObject(wgs->caretbm);
+    bits = snewn(bmsize, char);
+    memset(bits, 0, bmsize);
+    wgs->caretbm = CreateBitmap(wgs->font_width, wgs->font_height,
+                                1, 1, bits);
+    sfree(bits);
+    CreateCaret(wgs->term_hwnd, wgs->caretbm,
+                wgs->font_width, wgs->font_height);
+    /*
+     * CreateCaret creates a hidden caret (show count = 0), which would
+     * break the HideCaret/ShowCaret pairing in WM_PAINT and make the
+     * caret permanently invisible. ShowCaret restores the count so the
+     * caret remains visible. If the window doesn't own the caret (no
+     * focus), ShowCaret is a no-op, and WM_SETFOCUS will properly
+     * create and show the caret later.
+     */
+    ShowCaret(wgs->term_hwnd);
+}
+
+static void zoom_font(WinGuiSeat *wgs, int step)
+{
+    int old_height = wgs->font_height;
+    int new_height = old_height + step;
+    int window_border;
+    RECT cr;
+
+    if (new_height < 4 || new_height > 200)
+        return;
+
+    window_border = conf_get_int(wgs->conf, CONF_window_border);
+
+    deinit_fonts(wgs);
+    init_fonts(wgs, 0, new_height);
+
+    /*
+     * init_fonts reads back the actual rendered font metrics, which may
+     * differ from the requested size. If the font didn't actually change,
+     * try again with a larger step until it does (or we hit bounds).
+     */
+    while (wgs->font_height == old_height) {
+        new_height += step;
+        if (new_height < 4 || new_height > 200) {
+            /* Restore the old font if we can't change size */
+            deinit_fonts(wgs);
+            init_fonts(wgs, 0, old_height);
+            return;
+        }
+        deinit_fonts(wgs);
+        init_fonts(wgs, 0, new_height);
+    }
+
+    /* Recreate the caret bitmap to match the new font size */
+    recreate_caret_bitmap(wgs);
+
+    GetClientRect(wgs->term_hwnd, &cr);
+    int win_width = cr.right - cr.left;
+    int win_height = cr.bottom - cr.top;
+
+    if (IsZoomed(wgs->term_hwnd)) {
+        /* Fullscreen/maximized: adjust cols/rows to fill window */
+        int new_cols = (win_width - 2 * window_border) / wgs->font_width;
+        int new_rows = (win_height - 2 * window_border) / wgs->font_height;
+        if (new_cols < 1) new_cols = 1;
+        if (new_rows < 1) new_rows = 1;
+        term_size(wgs->term, new_rows, new_cols,
+                  conf_get_int(wgs->conf, CONF_savelines));
+        wgs->offset_width = (win_width - wgs->font_width * wgs->term->cols) / 2;
+        wgs->offset_height = (win_height - wgs->font_height * wgs->term->rows) / 2;
+    } else {
+        /* Windowed: keep cols/rows, resize window.
+         * Suppress WM_SIZE's auto-resize by briefly setting the
+         * interactive-resize flag, so the terminal doesn't recalculate
+         * cols/rows from the new window size. */
+        wgs->resizing = true;
+        SetWindowPos(wgs->term_hwnd, NULL, 0, 0,
+                     wgs->font_width * wgs->term->cols + wgs->extra_width,
+                     wgs->font_height * wgs->term->rows + wgs->extra_height,
+                     SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE |
+                     SWP_NOCOPYBITS);
+        wgs->resizing = false;
+        recompute_window_offset(wgs);
+    }
+
+    InvalidateRect(wgs->term_hwnd, NULL, true);
+    term_invalidate(wgs->term);
+}
+
 static void wintw_request_resize(TermWin *tw, int w, int h)
 {
     WinGuiSeat *wgs = container_of(tw, WinGuiSeat, termwin);
@@ -2223,6 +2327,8 @@ static void click(WinGuiSeat *wgs, Mouse_Button b, int x, int y,
                   bool shift, bool ctrl, bool alt)
 {
     int thistime = GetMessageTime();
+    bool dismiss_selection = (b == MBT_LEFT &&
+                              wgs->term->selstate == SELECTED);
 
     if (wgs->send_raw_mouse &&
         !(shift && conf_get_bool(wgs->conf, CONF_mouse_override))) {
@@ -2232,7 +2338,16 @@ static void click(WinGuiSeat *wgs, Mouse_Button b, int x, int y,
         return;
     }
 
-    if (wgs->lastbtn == b && thistime - wgs->lasttime < wgs->dbltime) {
+    /*
+     * If this click will dismiss an existing selection, always treat it
+     * as a simple single click (MA_CLICK). This prevents the click from
+     * being escalated to MA_2CLK, which would start word-selection mode
+     * when the user only intended to dismiss the selection.
+     */
+    if (dismiss_selection) {
+        wgs->lastbtn = b;
+        wgs->lastact = MA_CLICK;
+    } else if (wgs->lastbtn == b && thistime - wgs->lasttime < wgs->dbltime) {
         wgs->lastact = (wgs->lastact == MA_CLICK ? MA_2CLK :
                    wgs->lastact == MA_2CLK ? MA_3CLK :
                    wgs->lastact == MA_3CLK ? MA_CLICK : MA_NOTHING);
@@ -2240,9 +2355,18 @@ static void click(WinGuiSeat *wgs, Mouse_Button b, int x, int y,
         wgs->lastbtn = b;
         wgs->lastact = MA_CLICK;
     }
+
     if (wgs->lastact != MA_NOTHING)
         term_mouse(wgs->term, b, translate_button(wgs, b), wgs->lastact,
                    x, y, shift, ctrl, alt);
+
+    /*
+     * After dismissing a selection, reset double-click tracking so the
+     * next click starts fresh and won't be misinterpreted as MA_2CLK.
+     */
+    if (dismiss_selection)
+        wgs->lastbtn = MBT_NOTHING;
+
     wgs->lasttime = thistime;
 }
 
@@ -3626,6 +3750,12 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT message,
                 } else
                     break;
 
+                /* Ctrl+scroll: zoom font size */
+                if (control_pressed && message != WM_MOUSEHWHEEL) {
+                    zoom_font(wgs, b == MBT_WHEEL_UP ? 1 : -1);
+                    continue;
+                }
+
                 if (wgs->send_raw_mouse &&
                     !(conf_get_bool(wgs->conf, CONF_mouse_override) &&
                       shift_pressed)) {
@@ -4729,6 +4859,27 @@ static int TranslateKey(WinGuiSeat *wgs, UINT message, WPARAM wParam,
             (conf_get_int(wgs->conf, CONF_resize_action) != RESIZE_DISABLED)) {
             if ((HIWORD(lParam) & (KF_UP | KF_REPEAT)) != KF_REPEAT)
                 flip_full_screen(wgs);
+            return -1;
+        }
+        /* Ctrl+Shift+Plus/Minus: zoom font in/out.
+         * Using Ctrl+Shift avoids conflict with Ctrl+- (0x1F) and
+         * other Ctrl+key special character inputs. */
+        if (shift_state == 3 && wParam == VK_OEM_PLUS) {
+            if (key_down) zoom_font(wgs, 1);
+            return -1;
+        }
+        if (shift_state == 3 && wParam == VK_OEM_MINUS) {
+            if (key_down) zoom_font(wgs, -1);
+            return -1;
+        }
+        /* Ctrl+0: reset font to default size */
+        if (shift_state == 2 && wParam == '0') {
+            if (key_down) {
+                deinit_fonts(wgs);
+                init_fonts(wgs, 0, 0);
+                recreate_caret_bitmap(wgs);
+                reset_window(wgs, 2);
+            }
             return -1;
         }
         /* Control-Numlock for app-keypad mode switch */
