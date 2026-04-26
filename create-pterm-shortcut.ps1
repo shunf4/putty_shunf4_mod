@@ -14,7 +14,7 @@ and middle-click on the taskbar button to spawn a new pterm instance.
     Directory where the .lnk file is created.  Default: current directory.
 
 .PARAMETER ShortcutName
-    Name of the shortcut file.  Default: pterm-copy-to-start-menu-programs.lnk.
+    Name of the shortcut file.  Default: pterm-change-target-and-copy-to-start-menu-programs.lnk.
 
 .PARAMETER TargetPath
     Path to pterm.exe.  Default: .\Release\pterm.exe.
@@ -53,7 +53,7 @@ and middle-click on the taskbar button to spawn a new pterm instance.
 
 param(
     [string]$ShortcutDir = ".",
-    [string]$ShortcutName = "pterm-copy-to-start-menu-programs.lnk",
+    [string]$ShortcutName = "pterm-change-target-and-copy-to-start-menu-programs.lnk",
     [string]$TargetPath = ".\Release\pterm.exe",
     [string]$Arguments = "",
     [string]$AppUserModelId = "SimonTatham.Pterm.shunf4-mod",
