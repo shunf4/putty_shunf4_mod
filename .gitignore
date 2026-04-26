@@ -157,3 +157,5 @@ Makefile
 /*/x86/Debug/**
 /*/x64/Release/**
 /*/x64/Debug/**
+
+/pterm-change-target-and-copy-to-start-menu-programs.lnk

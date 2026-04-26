@@ -187,3 +187,72 @@ reports saying `it doesn't work' will waste your time as much as
 ours.
 
 See the file LICENCE for the licence conditions.
+
+
+## Taskbar Shift+Click / Middle-Click Setup
+
+pterm is a portable executable without an installer, so Windows has no
+Start Menu shortcut to use as its "launch entry".  This means
+**Shift+Click** and **middle-click** on the taskbar button will not
+spawn a new instance by default.
+
+The script `create-pterm-shortcut.ps1` creates a shortcut (`.lnk`) with
+the correct `AppUserModelID` that matches pterm's internal ID.  Once
+this shortcut is in the Start Menu, Windows can find it and launch a
+new instance when you Shift+Click or middle-click the taskbar icon.
+
+### Quick start
+
+```powershell
+# Create shortcut in current directory AND install to Start Menu:
+powershell -ExecutionPolicy Bypass -File create-pterm-shortcut.ps1 -InstallStartMenu
+```
+
+After running the above, restart pterm.  Shift+Click or middle-click the
+taskbar icon -- a new instance will launch.
+
+### All options
+
+```powershell
+powershell -ExecutionPolicy Bypass -File create-pterm-shortcut.ps1 `
+    [-ShortcutDir    <dir>]     `  # output directory (default: .)
+    [-ShortcutName   <name>]    `  # .lnk filename   (default: pterm-change-target-and-copy-to-start-menu-programs.lnk)
+    [-TargetPath     <exe>]     `  # path to pterm    (default: .\Release\pterm.exe)
+    [-Arguments      <args>]    `  # command-line args (default: empty. Use \" to escape double quotes in win process command line.)
+    [-AppUserModelId <id>]      `  # must match pterm.c (default: SimonTatham.Pterm.shunf4-mod)
+    [-InstallStartMenu]            # also copy to Start Menu
+```
+
+### Examples
+
+```powershell
+# Default settings, install to Start Menu
+powershell -ExecutionPolicy Bypass -File create-pterm-shortcut.ps1 -InstallStartMenu
+
+# With custom font and window size
+powershell -ExecutionPolicy Bypass -File create-pterm-shortcut.ps1 `
+    -Arguments '-o "Font=Consolas,14" -o TermWidth=120 -o TermHeight=36' `
+    -InstallStartMenu
+
+# Launch WSL by default
+powershell -ExecutionPolicy Bypass -File create-pterm-shortcut.ps1 `
+    -Arguments '-e wsl' `
+    -InstallStartMenu
+
+# Create shortcut in current directory only (manual install later)
+powershell -ExecutionPolicy Bypass -File create-pterm-shortcut.ps1
+```
+
+### Notes
+
+- `-Arguments` sets the **default** launch parameters for the new
+  instance spawned by Shift+Click.  The currently running instance is
+  unaffected.  If you want every new instance to use the same arguments
+  as the current one, put those arguments in `-Arguments`.
+
+- To remove the Start Menu entry, delete the `.lnk` file from
+  `%APPDATA%\Microsoft\Windows\Start Menu\Programs\`.
+
+- The `AppUserModelId` must match the value returned by
+  `get_app_user_model_id()` in `windows/pterm.c`.  If you change it
+  there, re-run the script with the matching `-AppUserModelId`.
