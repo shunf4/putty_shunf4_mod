@@ -216,8 +216,8 @@ taskbar icon -- a new instance will launch.
 ```powershell
 powershell -ExecutionPolicy Bypass -File create-pterm-shortcut.ps1 `
     [-ShortcutDir    <dir>]     `  # output directory (default: .)
-    [-ShortcutName   <name>]    `  # .lnk filename   (default: pterm-change-target-and-copy-to-start-menu-programs.lnk)
-    [-TargetPath     <exe>]     `  # path to pterm    (default: .\Release\pterm.exe)
+    [-ShortcutName   <name>]    `  # .lnk filename   (default: pterm-copy-to-start-menu-programs.lnk)
+    [-TargetPath     <exe>]     `  # path to pterm    (default: .\pterm.exe)
     [-Arguments      <args>]    `  # command-line args (default: empty. Use \" to escape double quotes in win process command line.)
     [-AppUserModelId <id>]      `  # must match pterm.c (default: SimonTatham.Pterm.shunf4-mod)
     [-InstallStartMenu]            # also copy to Start Menu
