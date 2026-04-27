@@ -4,6 +4,10 @@ run with:
 
 powershell -ExecutionPolicy Bypass -File create-pterm-shortcut.ps1 -Arguments "\"a   \"  \"cd\""
 
+or:
+
+powershell -ExecutionPolicy Bypass -File create-pterm-shortcut.ps1 -TargetPath ....\cyg.exe -Arguments ""
+
 .SYNOPSIS
 Creates a pterm shortcut (.lnk) with a custom AppUserModelID.
 
