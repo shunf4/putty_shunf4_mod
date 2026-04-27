@@ -1,4 +1,9 @@
 <#
+
+run with:
+
+powershell -ExecutionPolicy Bypass -File create-pterm-shortcut.ps1 -Arguments "\"a   \"  \"cd\""
+
 .SYNOPSIS
 Creates a pterm shortcut (.lnk) with a custom AppUserModelID.
 
@@ -14,10 +19,10 @@ and middle-click on the taskbar button to spawn a new pterm instance.
     Directory where the .lnk file is created.  Default: current directory.
 
 .PARAMETER ShortcutName
-    Name of the shortcut file.  Default: pterm-change-target-and-copy-to-start-menu-programs.lnk.
+    Name of the shortcut file.  Default: pterm-copy-to-start-menu-programs.lnk.
 
 .PARAMETER TargetPath
-    Path to pterm.exe.  Default: .\Release\pterm.exe.
+    Path to pterm.exe.  Default: .\pterm.exe.
 
 .PARAMETER Arguments
     Command-line arguments for pterm.exe.  Default: empty (default shell). Use \" to escape double quotes in win process command line.
@@ -53,8 +58,8 @@ and middle-click on the taskbar button to spawn a new pterm instance.
 
 param(
     [string]$ShortcutDir = ".",
-    [string]$ShortcutName = "pterm-change-target-and-copy-to-start-menu-programs.lnk",
-    [string]$TargetPath = ".\Release\pterm.exe",
+    [string]$ShortcutName = "pterm-copy-to-start-menu-programs.lnk",
+    [string]$TargetPath = ".\pterm.exe",
     [string]$Arguments = "",
     [string]$AppUserModelId = "SimonTatham.Pterm.shunf4-mod",
     [switch]$InstallStartMenu
