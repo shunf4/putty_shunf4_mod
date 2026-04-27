@@ -201,7 +201,7 @@ https://msdn.microsoft.com/en-us/library/windows/desktop/dd391569(v=vs.85).aspx
                      via http://stackoverflow.com/questions/2820983/ -->
                 <ShortcutProperty
                     Key="{9F4C2855-9F79-4B39-A8D0-E1D42DE1D5F3}, 5"
-                    Value="SimonTatham.PuTTY" />
+                    Value="SimonTatham.PuTTY.shunf4-mod" />
               </Shortcut>
             </File>
           </Component>
@@ -368,7 +368,7 @@ https://msdn.microsoft.com/en-us/library/windows/desktop/dd391569(v=vs.85).aspx
                  copying shortcuts around. -->
             <ShortcutProperty
                 Key="{9F4C2855-9F79-4B39-A8D0-E1D42DE1D5F3}, 5"
-                Value="SimonTatham.PuTTY" />
+                Value="SimonTatham.PuTTY.shunf4-mod" />
           </Shortcut>
           <RegistryValue Root="HKLM"
                          Key="$(var.RegKeyPathLocation)\DesktopEntry"
