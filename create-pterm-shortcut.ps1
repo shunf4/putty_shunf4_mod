@@ -6,7 +6,7 @@ powershell -ExecutionPolicy Bypass -File create-pterm-shortcut.ps1 -Arguments "\
 
 or:
 
-powershell -ExecutionPolicy Bypass -File create-pterm-shortcut.ps1 -TargetPath ....\cyg.exe -Arguments ""
+powershell -ExecutionPolicy Bypass -File create-pterm-shortcut.ps1 -IconStr ".\pterm.exe,0" -TargetPath ....\cyg.exe -Arguments ""
 
 .SYNOPSIS
 Creates a pterm shortcut (.lnk) with a custom AppUserModelID.
@@ -27,6 +27,8 @@ and middle-click on the taskbar button to spawn a new pterm instance.
 
 .PARAMETER TargetPath
     Path to pterm.exe.  Default: .\pterm.exe.
+
+.PARAMETER IconStr
 
 .PARAMETER Arguments
     Command-line arguments for pterm.exe.  Default: empty (default shell). Use \" to escape double quotes in win process command line.
@@ -64,6 +66,7 @@ param(
     [string]$ShortcutDir = ".",
     [string]$ShortcutName = "pterm-copy-to-start-menu-programs.lnk",
     [string]$TargetPath = ".\pterm.exe",
+    [string]$IconStr = ".\pterm.exe,0",
     [string]$Arguments = "",
     [string]$AppUserModelId = "SimonTatham.Pterm.shunf4-mod",
     [switch]$InstallStartMenu
@@ -78,6 +81,22 @@ if (-not (Test-Path $TargetPath)) {
     Write-Error "Target not found: $TargetPath"
     exit 1
 }
+
+$iconStrLastComma = $IconStr.LastIndexOf(',')
+
+if ($iconStrLastComma -ne -1) {
+    $iconStrFirstPart = $IconStr.Substring(0, $iconStrLastComma)
+    $iconStrSecondPart = $IconStr.Substring($iconStrLastComma + 1)
+    $iconStrFirstPart = [System.IO.Path]::GetFullPath($iconStrFirstPart)
+    if (-not (Test-Path $iconStrFirstPart)) {
+        Write-Error "Icon source not found: $iconStrFirstPart"
+        exit 1
+    }
+    $IconStr = "$iconStrFirstPart,$iconStrSecondPart"
+}
+
+echo '====='
+echo $IconStr
 echo '====='
 echo $Arguments
 echo '====='
@@ -97,6 +116,7 @@ $lnk = $WshShell.CreateShortcut($ShortcutPath)
 $lnk.TargetPath = $TargetPath
 $lnk.Arguments = $Arguments
 $lnk.WorkingDirectory = $WorkingDir
+$lnk.IconLocation = $IconStr
 $lnk.Description = "pterm - PuTTY-style terminal emulator"
 $lnk.Save()
 Write-Host "  Target : $TargetPath"
