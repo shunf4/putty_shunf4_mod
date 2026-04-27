@@ -114,6 +114,9 @@ static void set_input_locale(WinGuiSeat *wgs, HKL);
 static void update_savedsess_menu(WinGuiSeat *wgs);
 static void init_winfuncs(void);
 
+static void set_window_level_app_user_model_id(HWND hwnd);
+static void set_window_relaunch_props(HWND hwnd);
+
 static bool is_full_screen(WinGuiSeat *wgs);
 static void make_full_screen(WinGuiSeat *wgs);
 static void clear_full_screen(WinGuiSeat *wgs);
@@ -717,6 +720,19 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
     }
 
     SetWindowLongPtr(wgs->term_hwnd, GWLP_USERDATA, (LONG_PTR)wgs);
+
+    // a *WINDOW* level AppUserModelId is the prerequisite of defining relaunch
+    // props.
+    set_window_level_app_user_model_id(wgs->term_hwnd);
+    /*
+     * Set the RelaunchCommand property on the window so that
+     * Shift+Click / middle-click on the taskbar icon can spawn a new
+     * instance.  Without this, the explicit AppUserModelID causes
+     * Windows to look for a Start Menu shortcut with that ID, and
+     * when none is found (e.g. launched from the command line) the
+     * relaunch action silently does nothing.
+     */
+    set_window_relaunch_props(wgs->term_hwnd);
 
     /*
      * Initialise the fonts, simultaneously correcting the guesses
@@ -4517,6 +4533,267 @@ static int wintw_char_width(TermWin *tw, int uc)
     ibuf /= wgs->font_width;
 
     return ibuf;
+}
+
+/* Provide PROPERTYKEY / PROPVARIANT if the headers didn't (MinGW). */
+#ifndef PROPERTYKEY_DEFINED
+#define PROPERTYKEY_DEFINED
+typedef struct _tagpropertykey {
+    GUID fmtid;
+    DWORD pid;
+} PROPERTYKEY;
+#endif
+#if !defined _PROPVARIANTINIT_DEFINED_ && !defined _PROPVARIANT_INIT_DEFINED_
+#define _PROPVARIANTINIT_DEFINED_
+#ifndef PropVariantInit
+#define PropVariantInit(pvar) memset((pvar), 0, sizeof(PROPVARIANT))
+#endif
+#endif
+
+/* Minimal COM types for IPropertyStore (same approach as jump-list.c) */
+typedef struct IPropertyStoreVtbl_ {
+    HRESULT (__stdcall *QueryInterface)(void *, const GUID *, void **);
+    ULONG   (__stdcall *AddRef)(void *);
+    ULONG   (__stdcall *Release)(void *);
+    HRESULT (__stdcall *GetCount)(void *, DWORD *);
+    HRESULT (__stdcall *GetAt)(void *, DWORD, PROPERTYKEY *);
+    HRESULT (__stdcall *GetValue)(void *, const PROPERTYKEY *, PROPVARIANT *);
+    HRESULT (__stdcall *SetValue)(void *, const PROPERTYKEY *, PROPVARIANT *);
+    HRESULT (__stdcall *Commit)(void *);
+} IPropertyStoreVtbl_;
+
+typedef struct IPropertyStore_ {
+    IPropertyStoreVtbl_ *lpVtbl;
+} IPropertyStore_;
+
+static const IID IID_IPropertyStore_ = {
+    0x886d8eeb, 0x8cf2, 0x4446,
+    {0x8d, 0x02, 0xcd, 0xba, 0x1d, 0xbd, 0xcf, 0x99}
+};
+
+/* PKEY_AppUserModel_RelaunchCommand  {9F4C2855-...}  pid 2 */
+static const PROPERTYKEY PKEY_AppUserModel_RelaunchCommand = {
+    {0x9F4C2855, 0x9F79, 0x4B39,
+        {0xA8, 0xD0, 0xE1, 0xD4, 0x2D, 0xE1, 0xD5, 0xF3}}, 2
+};
+/* PKEY_AppUserModel_RelaunchIconResource  pid 3 */
+static const PROPERTYKEY PKEY_AppUserModel_RelaunchIconResource = {
+    {0x9F4C2855, 0x9F79, 0x4B39,
+        {0xA8, 0xD0, 0xE1, 0xD4, 0x2D, 0xE1, 0xD5, 0xF3}}, 3
+};
+/* PKEY_AppUserModel_RelaunchDisplayNameResource  pid 4 */
+static const PROPERTYKEY PKEY_AppUserModel_RelaunchDisplayNameResource = {
+    {0x9F4C2855, 0x9F79, 0x4B39,
+        {0xA8, 0xD0, 0xE1, 0xD4, 0x2D, 0xE1, 0xD5, 0xF3}}, 4
+};
+static const PROPERTYKEY PKEY_AppUserModel_ID = {
+    {0x9F4C2855, 0x9F79, 0x4B39,
+        {0xA8, 0xD0, 0xE1, 0xD4, 0x2D, 0xE1, 0xD5, 0xF3}}, 5
+};
+
+DECL_WINDOWS_FUNCTION(
+        static, HRESULT, SHGetPropertyStoreForWindow,
+        (HWND, REFIID, void **));
+
+static void set_window_level_app_user_model_id(HWND hwnd)
+{
+    static HMODULE shell32_module = 0;
+    if (!shell32_module) {
+        shell32_module = load_system32_dll("Shell32.dll");
+        GET_WINDOWS_FUNCTION_NO_TYPECHECK(
+            shell32_module, SHGetPropertyStoreForWindow);
+    }
+
+    OutputDebugStringA("set_window_level_app_user_model_id: entry");
+
+    if (!p_SHGetPropertyStoreForWindow) {
+        OutputDebugStringA("set_window_level_app_user_model_id: "
+                           "SHGetPropertyStoreForWindow not available, bail");
+        return;
+    }
+    OutputDebugStringA("set_window_level_app_user_model_id: "
+                       "SHGetPropertyStoreForWindow found");
+
+    IPropertyStore_ *pps = NULL;
+    HRESULT hr = p_SHGetPropertyStoreForWindow(
+        hwnd, &IID_IPropertyStore_, (void **)&pps);
+    if (FAILED(hr) || !pps) {
+        char dbg[200];
+        sprintf(dbg, "set_window_level_app_user_model_id: "
+                "SHGetPropertyStoreForWindow failed, hr=0x%08lX", hr);
+        OutputDebugStringA(dbg);
+        return;
+    }
+    OutputDebugStringA("set_window_level_app_user_model_id: "
+                       "IPropertyStore obtained");
+
+    PROPVARIANT pv;
+    HRESULT hr2;
+
+    PropVariantInit(&pv);
+    pv.vt = VT_LPWSTR;
+    pv.pwszVal = get_app_user_model_id();
+    hr = pps->lpVtbl->SetValue(pps, &PKEY_AppUserModel_ID, &pv);
+    {
+        char dbg[200];
+        sprintf(dbg, "set_window_level_app_user_model_id: SetValue Command hr=0x%08lX", hr);
+        OutputDebugStringA(dbg);
+    }
+
+    hr = pps->lpVtbl->Commit(pps);
+    {
+        char dbg[200];
+        sprintf(dbg, "set_window_level_app_user_model_id: Commit hr=0x%08lX", hr);
+        OutputDebugStringA(dbg);
+    }
+    pps->lpVtbl->Release(pps);
+    OutputDebugStringA("set_window_level_app_user_model_id: done");
+}
+
+static void set_window_relaunch_props(HWND hwnd)
+{
+    static HMODULE shell32_module = 0;
+    if (!shell32_module) {
+        shell32_module = load_system32_dll("Shell32.dll");
+        GET_WINDOWS_FUNCTION_NO_TYPECHECK(
+            shell32_module, SHGetPropertyStoreForWindow);
+    }
+
+    OutputDebugStringA("set_window_relaunch_props: entry");
+
+    if (!p_SHGetPropertyStoreForWindow) {
+        OutputDebugStringA("set_window_relaunch_props: "
+                           "SHGetPropertyStoreForWindow not available, bail");
+        return;
+    }
+    OutputDebugStringA("set_window_relaunch_props: "
+                       "SHGetPropertyStoreForWindow found");
+
+    IPropertyStore_ *pps = NULL;
+    HRESULT hr = p_SHGetPropertyStoreForWindow(
+        hwnd, &IID_IPropertyStore_, (void **)&pps);
+    if (FAILED(hr) || !pps) {
+        char dbg[200];
+        sprintf(dbg, "set_window_relaunch_props: "
+                "SHGetPropertyStoreForWindow failed, hr=0x%08lX", hr);
+        OutputDebugStringA(dbg);
+        return;
+    }
+    OutputDebugStringA("set_window_relaunch_props: "
+                       "IPropertyStore obtained");
+
+    /* Preserve the full original command line so that the relaunched
+     * instance inherits all parameters (e.g. -o Font=Consolas,14
+     * -e wsl ...).  GetCommandLineW() returns the OS-owned buffer
+     * and IPropertyStore::SetValue copies it. */
+    wchar_t *raw_cmd = GetCommandLineW();
+    wchar_t *relaunch_cmd = raw_cmd;
+    {
+        wchar_t dbg[4096];
+        _snwprintf(dbg, sizeof(dbg),
+                 L"set_window_relaunch_props: GetCommandLineW = [%ls]",
+                 raw_cmd);
+        OutputDebugStringW(dbg);
+    }
+
+    /* If the command-line argument portion starts with '&' it is an
+     * internal IPC handle (&hex_handle:size) used to pass a serialised
+     * Conf via file mapping.  That handle is process-specific and will
+     * be stale in a new instance, so fall back to the bare exe path. */
+    {
+        const wchar_t *args = raw_cmd;
+        if (*args == L'"') {
+            args++;
+            while (*args && *args != L'"') args++;
+            if (*args == L'"') args++;
+        } else {
+            while (*args && *args != L' ' && *args != L'\t') args++;
+        }
+        while (*args == L' ' || *args == L'\t') args++;
+
+        if (*args == L'&') {
+            OutputDebugStringA("set_window_relaunch_props: "
+                               "IPC &handle:size detected, using exe path");
+            static wchar_t exe_fallback[MAX_PATH];
+            GetModuleFileNameW(NULL, exe_fallback, MAX_PATH);
+            relaunch_cmd = exe_fallback;
+        }
+    }
+
+    {
+        char dbg[2048];
+        snprintf(dbg, sizeof(dbg),
+                 "set_window_relaunch_props: RelaunchCommand = [%ls]",
+                 relaunch_cmd);
+        OutputDebugStringA(dbg);
+    }
+
+    /* Build icon resource string: "exe_path,0" */
+    wchar_t exe_path[MAX_PATH];
+    GetModuleFileNameW(NULL, exe_path, MAX_PATH);
+    wchar_t icon_res[MAX_PATH + 4];
+    _snwprintf(icon_res, _countof(icon_res), L"%ls,0", exe_path);
+    {
+        char dbg[2048];
+        snprintf(dbg, sizeof(dbg),
+                 "set_window_relaunch_props: IconResource = [%ls]", icon_res);
+        OutputDebugStringA(dbg);
+    }
+
+    /* Build display name from appname */
+    wchar_t display_name[256];
+    MultiByteToWideChar(CP_ACP, 0, appname, -1, display_name, 256);
+    {
+        char dbg[256];
+        snprintf(dbg, sizeof(dbg),
+                 "set_window_relaunch_props: DisplayName = [%ls]", display_name);
+        OutputDebugStringA(dbg);
+    }
+
+    /* All three Relaunch properties must be set together, or Windows
+     * ignores the entire set (MSDN: "If any one of these three
+     * properties is set, the others must be set as well.") */
+    PROPVARIANT pv;
+    HRESULT hr2;
+
+    PropVariantInit(&pv);
+    pv.vt = VT_LPWSTR;
+    pv.pwszVal = relaunch_cmd;
+    hr = pps->lpVtbl->SetValue(pps, &PKEY_AppUserModel_RelaunchCommand, &pv);
+    {
+        char dbg[200];
+        sprintf(dbg, "set_window_relaunch_props: SetValue Command hr=0x%08lX", hr);
+        OutputDebugStringA(dbg);
+    }
+
+    PropVariantInit(&pv);
+    pv.vt = VT_LPWSTR;
+    pv.pwszVal = icon_res;
+    hr2 = pps->lpVtbl->SetValue(pps, &PKEY_AppUserModel_RelaunchIconResource, &pv);
+    {
+        char dbg[200];
+        sprintf(dbg, "set_window_relaunch_props: SetValue Icon hr=0x%08lX", hr2);
+        OutputDebugStringA(dbg);
+    }
+
+    PropVariantInit(&pv);
+    pv.vt = VT_LPWSTR;
+    pv.pwszVal = display_name;
+    hr2 = pps->lpVtbl->SetValue(pps, &PKEY_AppUserModel_RelaunchDisplayNameResource, &pv);
+    {
+        char dbg[200];
+        sprintf(dbg, "set_window_relaunch_props: SetValue DisplayName hr=0x%08lX", hr2);
+        OutputDebugStringA(dbg);
+    }
+
+    hr = pps->lpVtbl->Commit(pps);
+    {
+        char dbg[200];
+        sprintf(dbg, "set_window_relaunch_props: Commit hr=0x%08lX", hr);
+        OutputDebugStringA(dbg);
+    }
+    pps->lpVtbl->Release(pps);
+    OutputDebugStringA("set_window_relaunch_props: done");
 }
 
 DECL_WINDOWS_FUNCTION(static, BOOL, FlashWindowEx, (PFLASHWINFO));
