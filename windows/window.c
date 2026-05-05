@@ -843,13 +843,6 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
     wgs->lastact = MA_NOTHING;
     wgs->lastbtn = MBT_NOTHING;
     wgs->dbltime = GetDoubleClickTime();
-    /*
-     * Cap the double-click threshold at 400ms. The Windows default
-     * (500ms) is too generous and causes false double-click detection
-     * when the user quickly dismisses a selection and starts a new one.
-     */
-    if (wgs->dbltime > 400)
-        wgs->dbltime = 400;
 
     /*
      * Set up the session-control options on the system menu.
@@ -1285,6 +1278,10 @@ static void win_seat_set_busy_status(Seat *seat, BusyStatus status)
 static void wintw_set_raw_mouse_mode(TermWin *tw, bool activate)
 {
     WinGuiSeat *wgs = container_of(tw, WinGuiSeat, termwin);
+    if (wgs->send_raw_mouse != activate) {
+        wgs->lastbtn = MBT_NOTHING;
+        wgs->lastact = MA_NOTHING;
+    }
     wgs->send_raw_mouse = activate;
 }
 
@@ -2264,31 +2261,52 @@ static void set_input_locale(WinGuiSeat *wgs, HKL kl)
     wgs->kbd_codepage = atoi(lbuf);
 }
 
-static void click(WinGuiSeat *wgs, Mouse_Button b, int x, int y,
+static int dpi_aware_system_metric(WinGuiSeat *wgs, int metric, int dpi)
+{
+    // GetSystemMetrics* calls are said to (by GLM) be cached by Windows system,
+    // so let it be called each click.
+    if (p_GetSystemMetricsForDpi)
+        return p_GetSystemMetricsForDpi(metric, dpi);
+    return GetSystemMetrics(metric);
+}
+
+static void click(WinGuiSeat *wgs, Mouse_Button b,
+                  int raw_x, int raw_y, int x, int y,
                   bool shift, bool ctrl, bool alt)
 {
-    int thistime = GetMessageTime();
-    bool dismiss_selection = (b == MBT_LEFT &&
-                              wgs->term->selstate == SELECTED);
+    DWORD thistime = GetMessageTime();
+    Mouse_Button bcooked = translate_button(wgs, b);
 
     if (wgs->send_raw_mouse &&
         !(shift && conf_get_bool(wgs->conf, CONF_mouse_override))) {
         wgs->lastbtn = MBT_NOTHING;
-        term_mouse(wgs->term, b, translate_button(wgs, b), MA_CLICK,
+        term_mouse(wgs->term, b, bcooked, MA_CLICK,
                    x, y, shift, ctrl, alt);
         return;
     }
 
     /*
-     * If this click will dismiss an existing selection, always treat it
-     * as a simple single click (MA_CLICK). This prevents the click from
-     * being escalated to MA_2CLK, which would start word-selection mode
-     * when the user only intended to dismiss the selection.
+     * Treat as a multi-click only if the same mouse action is repeated
+     * within the double-click window and near the previous click. Use
+     * Windows's DPI-aware double-click rectangle (doubled for terminal
+     * text), with same-cell clicks accepted as nearby too.
      */
-    if (dismiss_selection) {
-        wgs->lastbtn = b;
-        wgs->lastact = MA_CLICK;
-    } else if (wgs->lastbtn == b && thistime - wgs->lasttime < wgs->dbltime) {
+    int doubleclick_width = 2 * dpi_aware_system_metric(
+        wgs, SM_CXDOUBLECLK, wgs->dpi_info.cur_dpi.x);
+    int doubleclick_height = 2 * dpi_aware_system_metric(
+        wgs, SM_CYDOUBLECLK, wgs->dpi_info.cur_dpi.y);
+
+    int dx = raw_x - wgs->last_mouse_down_x;
+    int dy = raw_y - wgs->last_mouse_down_y;
+    bool nearby = ((abs(dx) <= doubleclick_width / 2 &&
+                    abs(dy) <= doubleclick_height / 2) ||
+                   (x == wgs->last_mouse_down_cell_x &&
+                    y == wgs->last_mouse_down_cell_y));
+    if (wgs->lastbtn == b && wgs->last_mouse_down_cooked == bcooked &&
+        shift == wgs->last_mouse_down_shift &&
+        ctrl == wgs->last_mouse_down_ctrl &&
+        alt == wgs->last_mouse_down_alt &&
+        thistime - wgs->lasttime <= (DWORD)wgs->dbltime && nearby) {
         wgs->lastact = (wgs->lastact == MA_CLICK ? MA_2CLK :
                    wgs->lastact == MA_2CLK ? MA_3CLK :
                    wgs->lastact == MA_3CLK ? MA_CLICK : MA_NOTHING);
@@ -2298,17 +2316,18 @@ static void click(WinGuiSeat *wgs, Mouse_Button b, int x, int y,
     }
 
     if (wgs->lastact != MA_NOTHING)
-        term_mouse(wgs->term, b, translate_button(wgs, b), wgs->lastact,
+        term_mouse(wgs->term, b, bcooked, wgs->lastact,
                    x, y, shift, ctrl, alt);
 
-    /*
-     * After dismissing a selection, reset double-click tracking so the
-     * next click starts fresh and won't be misinterpreted as MA_2CLK.
-     */
-    if (dismiss_selection)
-        wgs->lastbtn = MBT_NOTHING;
-
     wgs->lasttime = thistime;
+    wgs->last_mouse_down_x = raw_x;
+    wgs->last_mouse_down_y = raw_y;
+    wgs->last_mouse_down_cell_x = x;
+    wgs->last_mouse_down_cell_y = y;
+    wgs->last_mouse_down_cooked = bcooked;
+    wgs->last_mouse_down_shift = shift;
+    wgs->last_mouse_down_ctrl = ctrl;
+    wgs->last_mouse_down_alt = alt;
 }
 
 /*
@@ -2978,6 +2997,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT message,
 
             if (press) {
                 click(wgs, button,
+                      X_POS(lParam), Y_POS(lParam),
                       TO_CHR_X(X_POS(lParam)), TO_CHR_Y(Y_POS(lParam)),
                       wParam & MK_SHIFT, wParam & MK_CONTROL,
                       is_alt_pressed());

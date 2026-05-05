@@ -111,8 +111,12 @@ struct WinGuiSeat {
 
     struct _dpi_info dpi_info;
 
-    int dbltime, lasttime, lastact;
-    Mouse_Button lastbtn;
+    int dbltime, lastact;
+    DWORD lasttime;
+    int last_mouse_down_x, last_mouse_down_y;
+    int last_mouse_down_cell_x, last_mouse_down_cell_y;
+    Mouse_Button lastbtn, last_mouse_down_cooked;
+    bool last_mouse_down_shift, last_mouse_down_ctrl, last_mouse_down_alt;
 
     bool send_raw_mouse;
     int wheel_accumulator;
