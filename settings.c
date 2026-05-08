@@ -1132,6 +1132,30 @@ bool conf_apply_override(Conf *conf, const char *keyword, const char *value)
         return true;
     }
 
+    /* Wordness options: Wordness0..Wordness224 in steps of 32,
+     * each holding 32 comma-separated class values for that block. */
+    if (!strncmp(keyword, "Wordness", 8) && keyword[8] >= '0' && keyword[8] <= '9') {
+        int base = atoi(keyword + 8);
+        /* Verify the rest is purely digits */
+        const char *p = keyword + 8;
+        while (*p >= '0' && *p <= '9') p++;
+        if (*p != '\0')
+            return false;  /* trailing garbage after the number */
+        if (base < 0 || base > 224 || base % 32 != 0)
+            return false;
+        /* Parse up to 32 comma-separated integers */
+        const char *q = value;
+        for (int j = base; j < base + 32; j++) {
+            const char *s = q;
+            while (*q && *q != ',')
+                q++;
+            conf_set_int_int(conf, CONF_wordness, j, atoi(s));
+            if (*q == ',')
+                q++;
+        }
+        return true;
+    }
+
     /* Generic lookup via conf_key_info[] */
     for (size_t key = 0; key < N_CONFIG_OPTIONS; key++) {
         const ConfKeyInfo *info = &conf_key_info[key];
