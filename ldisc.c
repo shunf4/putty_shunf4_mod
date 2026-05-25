@@ -48,6 +48,7 @@ struct Ldisc_tag {
      */
     bool telnet_keyboard, telnet_newline;
     int protocol, localecho, localedit;
+    bool no_flow_control_keys;
 
     TermLineEditor *le;
     TermLineEditorCallbackReceiver le_rcv;
@@ -109,6 +110,8 @@ void ldisc_configure(Ldisc *ldisc, Conf *conf)
     ldisc->protocol = conf_get_int(conf, CONF_protocol);
     ldisc->localecho = conf_get_int(conf, CONF_localecho);
     ldisc->localedit = conf_get_int(conf, CONF_localedit);
+    ldisc->no_flow_control_keys =
+        conf_get_bool(conf, CONF_no_flow_control_keys);
 
     unsigned flags = 0;
     if (ldisc->protocol == PROT_RAW)
@@ -304,6 +307,13 @@ void ldisc_send(Ldisc *ldisc, const void *vbuf, int len, bool interactive)
     ldisc_input_queue_callback(ldisc);
 }
 
+static bool ldisc_filter_flow_control_key(Ldisc *ldisc, char c)
+{
+    if (ldisc->no_flow_control_keys && (c == CTRL('S') || c == CTRL('Q')))
+        return true;
+    return false;
+}
+
 static void ldisc_input_queue_callback(void *ctx)
 {
     Ldisc *ldisc = (Ldisc *)ctx;
@@ -323,6 +333,8 @@ static void ldisc_input_queue_callback(void *ctx)
             char c = *buf++;
             len--;
 
+            if (ldisc_filter_flow_control_key(ldisc, c))
+                continue;
             bool dedicated = is_dedicated_byte(c, type);
             lineedit_input(ldisc->userpass_le, c, dedicated);
         }
@@ -340,17 +352,35 @@ static void ldisc_input_queue_callback(void *ctx)
                 char c = *buf++;
                 len--;
 
+                if (ldisc_filter_flow_control_key(ldisc, c))
+                    continue;
                 bool dedicated = is_dedicated_byte(c, type);
                 lineedit_input(ldisc->le, c, dedicated);
             }
             ldisc_input_queue_consume(ldisc, buf - start);
         } else {
-            if (ECHOING)
-                seat_stdout(ldisc->seat, buf, len);
             if (type == DEDICATED && ldisc->protocol == PROT_TELNET) {
+                if (ECHOING) {
+                    if (ldisc->no_flow_control_keys) {
+                        const char *ep = buf;
+                        size_t erem = len;
+                        while (erem > 0) {
+                            char ec = *ep++;
+                            erem--;
+                            if (ec == CTRL('S') || ec == CTRL('Q'))
+                                continue;
+                            seat_stdout(ldisc->seat, &ec, 1);
+                        }
+                    } else {
+                        seat_stdout(ldisc->seat, buf, len);
+                    }
+                }
                 while (len > 0) {
                     char c = *buf++;
                     len--;
+
+                    if (ldisc_filter_flow_control_key(ldisc, c))
+                        continue;
                     switch (c) {
                       case CTRL('M'):
                         if (ldisc->telnet_newline)
@@ -382,7 +412,27 @@ static void ldisc_input_queue_callback(void *ctx)
                 }
                 ldisc_input_queue_consume(ldisc, buf - start);
             } else {
-                backend_send(ldisc->backend, buf, len);
+                /*
+                 * Non-editing, non-telnet-dedicated path: send in bulk.
+                 * If filtering flow control keys, we must go byte-by-byte.
+                 */
+                if (ldisc->no_flow_control_keys) {
+                    const char *p = buf;
+                    size_t remaining = len;
+                    while (remaining > 0) {
+                        char c = *p++;
+                        remaining--;
+                        if (c == CTRL('S') || c == CTRL('Q'))
+                            continue;
+                        if (ECHOING)
+                            seat_stdout(ldisc->seat, &c, 1);
+                        backend_send(ldisc->backend, &c, 1);
+                    }
+                } else {
+                    if (ECHOING)
+                        seat_stdout(ldisc->seat, buf, len);
+                    backend_send(ldisc->backend, buf, len);
+                }
                 ldisc_input_queue_consume(ldisc, len);
             }
         }

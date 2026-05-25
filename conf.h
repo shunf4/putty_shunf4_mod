@@ -1318,3 +1318,10 @@ CONF_OPTION(mswin_wait_after_console_behaviour_msec,
     DEFAULT_INT(0),
     SAVE_KEYWORD("MsWinWaitAfterConsoleBehaviourMsec"),
 )
+
+/* Cross-platform pterm options (not saved to sessions) */
+CONF_OPTION(no_flow_control_keys,
+    VALUE_TYPE(BOOL),
+    DEFAULT_BOOL(false),
+    NOT_SAVED,
+)
