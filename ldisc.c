@@ -414,19 +414,25 @@ static void ldisc_input_queue_callback(void *ctx)
             } else {
                 /*
                  * Non-editing, non-telnet-dedicated path: send in bulk.
-                 * If filtering flow control keys, we must go byte-by-byte.
+                 * If filtering flow control keys, send in chunks between
+                 * the characters to skip, to avoid breaking escape
+                 * sequences by sending byte-by-byte to the backend.
                  */
                 if (ldisc->no_flow_control_keys) {
                     const char *p = buf;
-                    size_t remaining = len;
-                    while (remaining > 0) {
-                        char c = *p++;
-                        remaining--;
-                        if (c == CTRL('S') || c == CTRL('Q'))
-                            continue;
-                        if (ECHOING)
-                            seat_stdout(ldisc->seat, &c, 1);
-                        backend_send(ldisc->backend, &c, 1);
+                    const char *end = buf + len;
+                    while (p < end) {
+                        const char *next = p;
+                        while (next < end &&
+                               *next != CTRL('S') && *next != CTRL('Q'))
+                            next++;
+                        size_t chunk = next - p;
+                        if (chunk > 0) {
+                            if (ECHOING)
+                                seat_stdout(ldisc->seat, p, chunk);
+                            backend_send(ldisc->backend, p, chunk);
+                        }
+                        p = next + 1;
                     }
                 } else {
                     if (ECHOING)
