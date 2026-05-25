@@ -1111,6 +1111,13 @@ bool conf_apply_override(Conf *conf, const char *keyword, const char *value)
         conf_set_str(conf, CONF_mswin_conpty_flags, value);
         return true;
     }
+    if (!strcmp(keyword, "NoFlowControlKeys")) {
+        conf_set_bool(conf, CONF_no_flow_control_keys,
+                      !stricmp(value, "true") ||
+                      !stricmp(value, "yes") ||
+                      !strcmp(value, "1"));
+        return true;
+    }
 
     /* Colour options: Colour0..Colour21 stored as "R,G,B" strings,
      * mapped to CONF_colours subkeys i*3+{0,1,2}. */
