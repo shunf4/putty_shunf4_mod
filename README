@@ -7,7 +7,7 @@
 
 taskkill /f /im pterm.exe ; cmake --build . --config Release
 
- M='feat: option to disable flow control: NoFlowControlKeys'; ( set -x; gch main && git pull --autostash && cmake --build . --config Release && cp -v Release/pterm.exe Release/pterm_noemoji.exe && gcam "$M" && git push && gch nofontfallback && git pull --autostash && git merge main && cmake --build . --config Release && cp -v Release/pterm.exe Release/pterm_nofontfallback.exe && git push && gch emoji && git pull --autostash && git merge main && cmake --build . --config Release && cp -v Release/pterm.exe Release/pterm_emoji.exe && git push && gch main && ( ( echo;  echo ========; echo 'all done!'; echo ========; echo; ) >&2 ) )
+ M='shunf4 mod: fix: unexpected char echo after enabling NoFlowControlKeys'; ( set -x; gch main && git pull --autostash && cmake --build . --config Release && cp -v Release/pterm.exe Release/pterm_noemoji.exe && gcam "$M" && git push && gch nofontfallback && git pull --autostash && git merge --no-edit main && cmake --build . --config Release && cp -v Release/pterm.exe Release/pterm_nofontfallback.exe && git push && gch emoji && git pull --autostash && git merge --no-edit main && cmake --build . --config Release && cp -v Release/pterm.exe Release/pterm_emoji.exe && git push && gch main && ( ( echo;  echo ========; echo 'all done!'; echo ========; echo; ) >&2 ) )
 
 
 PuTTY source code README
