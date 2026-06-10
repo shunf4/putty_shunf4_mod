@@ -22,6 +22,7 @@ struct ConPTY {
     Seat *seat;
     LogContext *logctx;
     int bufsize;
+    int last_width, last_height;       /* track size to avoid redundant resize */
     Backend backend;
 };
 
@@ -422,6 +423,8 @@ static char *conpty_init(const BackendVtable *vt, Seat *seat,
     conpty->exited = false;
     conpty->exitstatus = 0;
     conpty->bufsize = 0;
+    conpty->last_width = size.X;
+    conpty->last_height = size.Y;
     conpty->backend.vt = vt;
     *backend_handle = &conpty->backend;
 
@@ -556,6 +559,10 @@ static size_t conpty_sendbuffer(Backend *be)
 static void conpty_size(Backend *be, int width, int height)
 {
     ConPTY *conpty = container_of(be, ConPTY, backend);
+    if (conpty->last_width == width && conpty->last_height == height)
+        return;                        /* avoid redundant resize */
+    conpty->last_width = width;
+    conpty->last_height = height;
     COORD size;
     size.X = width;
     size.Y = height;
