@@ -3072,7 +3072,7 @@ static void toggle_mode(Terminal *term, int mode, int query, bool state)
             break;
           case 3:                      /* DECCOLM: 80/132 columns */
             deselect(term);
-            if (!term->no_remote_resize)
+            if (!term->no_remote_resize && state != term->reset_132)
                 term_request_resize(term, state ? 132 : 80, term->rows);
             term->reset_132 = state;
             term->alt_t = term->marg_t = 0;
