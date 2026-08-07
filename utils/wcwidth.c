@@ -133,6 +133,17 @@ int mk_wcwidth(unsigned int ucs)
     #include "unicode/wide_chars.h"
   };
 
+  /*
+   * A sorted list of intervals of East Asian Ambiguous characters
+   * that should unconditionally be treated as double-width, without
+   * requiring the CJK ambiguous-wide setting. These are safe to
+   * widen because they do not conflict with TUI box-drawing usage:
+   * Roman numerals, arrows, and enclosed alphanumerics.
+   */
+  static const struct interval unconditionally_wide[] = {
+    #include "unicode/unconditionally_wide_chars.h"
+  };
+
   /* test for 8-bit control characters */
   if (ucs == 0)
     return 0;
@@ -149,6 +160,11 @@ int mk_wcwidth(unsigned int ucs)
   /* binary search in table of double-width characters */
   if (bisearch(ucs, wide,
            sizeof(wide) / sizeof(struct interval) - 1))
+    return 2;
+
+  /* binary search in table of unconditionally double-width ambiguous characters */
+  if (bisearch(ucs, unconditionally_wide,
+           sizeof(unconditionally_wide) / sizeof(struct interval) - 1))
     return 2;
 
   /* normal width character */
