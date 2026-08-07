@@ -28,13 +28,17 @@ void emoji_renderer_set_fonts(const WCHAR *const *names, int count);
 bool emoji_is_color_candidate(unsigned int uc);
 
 /* Render |text[0..len-1]| (UTF-16) as a color emoji onto |hdc|.
- * (x,y) = top-left of the destination cell, w×h = cell size.
- * font_height_px = terminal font height in pixels (used to size the emoji).
- * bg = background colour to fill behind the glyph.
+ * (x,y) = top-left of the render target; w×h = render target size
+ * (may be larger than the cell to allow overflow).
+ * cell_w = original cell width; background is painted only here.
+ * emoji_size_px = glyph size in pixels.  Because emoji glyphs are
+ *   roughly square, the caller passes the desired *width* here —
+ *   DirectWrite scales the glyph to this value in both dimensions.
  * Returns true on success. */
 bool emoji_render_color(HDC hdc, int x, int y, int w, int h,
+                        int cell_w,
                         const wchar_t *text, int len,
-                        int font_height_px, COLORREF fg, COLORREF bg);
+                        int emoji_size_px, COLORREF fg, COLORREF bg);
 
 #ifdef __cplusplus
 }

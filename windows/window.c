@@ -4342,17 +4342,49 @@ static void do_text_internal(
                     int ch = wgs->font_height;
                     if (lattr == LATTR_TOP || lattr == LATTR_BOT)
                         ch *= 2;
-                    
-                    /* Try colour-emoji rendering for ALL emoji candidates,
-                     * even if the main font has a monochrome glyph. */
+
+                    /*
+                     * Use the colour-emoji renderer for all emoji
+                     * candidates, even if the main font has a glyph.
+                     *
+                     * We pass cw (the cell width) as emoji_size_px.
+                     * DirectWrite sizes the glyph to this value in DIPs,
+                     * and emoji glyphs are roughly square, so the result
+                     * fits the cell width exactly.  For half-width cells
+                     * the glyph is smaller than the cell height, leaving
+                     * comfortable vertical padding; for full-width cells
+                     * (cw = 2 × font_width) it fills the whole area.
+                     */
                     bool emoji_done = false;
                     if (emoji_is_color_candidate(uc)) {
+                        int emoji_size = cw <= wgs->font_width
+                            ? (cw * 6 + 2) / 5   /* half-width: 1.2× */
+                            : cw;                  /* full-width: 1×   */
+                        int term_right = wgs->font_width *
+                                         wgs->term->cols +
+                                         wgs->offset_width;
+                        int emoji_x = x_seg - (emoji_size - cw) / 2;
+                        int emoji_w = emoji_size;
+
+                        /* Clamp to terminal window bounds */
+                        if (emoji_x < 0) {
+                            emoji_w += emoji_x;
+                            emoji_x = 0;
+                        }
+                        if (emoji_x + emoji_w > term_right)
+                            emoji_w = term_right - emoji_x;
+                        if (emoji_w < cw) {
+                            emoji_x = x_seg;
+                            emoji_w = cw;
+                        }
+
                         emoji_done = emoji_render_color(
-                            wgs->wintw_hdc, x_seg,
+                            wgs->wintw_hdc, emoji_x,
                             y - wgs->font_height *
                                 (lattr == LATTR_BOT) + text_adjust,
-                            cw, ch, &wbuf[i], clen,
-                            wgs->font_height, fg, bg);
+                            emoji_w, ch, cw,
+                            &wbuf[i], clen,
+                            emoji_size, fg, bg);
                     }
 
                     if (emoji_done && special_emoji) {

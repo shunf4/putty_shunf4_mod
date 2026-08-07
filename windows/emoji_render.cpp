@@ -154,8 +154,9 @@ extern "C" bool emoji_is_color_candidate(unsigned int uc)
 
 extern "C" bool emoji_render_color(
     HDC hdc, int x, int y, int w, int h,
+    int cell_w,
     const wchar_t *text, int len,
-    int font_height_px, COLORREF fg, COLORREF bg)
+    int emoji_size_px, COLORREF fg, COLORREF bg)
 {
     static wchar_t for_misc_symbols_add_var_sel_fe0f[2] = { '\x0000', '\x0000' };
     if (!g_rt || !g_dw) return false;
@@ -165,14 +166,14 @@ extern "C" bool emoji_render_color(
     //         OutputDebugStringA(abc);
     //     } 
     if (len == 2 && (text[0] >= 0x2600  && text[0] <= 0x26FF || text[0] >= 0x2700  && text[0] <= 0x27BF) && text[1] == 0xFE0E) {
-        // Misc Symbols + VarSel Text
+        // Misc Symbols + VS15 (text presentation) — not emoji
         return false;
     }
 
-    /* Convert pixel height to DIPs for DirectWrite */
+    /* Convert pixel size to DIPs for DirectWrite */
     int dpi = GetDeviceCaps(hdc, LOGPIXELSY);
     if (dpi <= 0) dpi = 96;
-    float dip = (float)font_height_px * 96.0f / (float)dpi;
+    float dip = (float)emoji_size_px * 96.0f / (float)dpi;
 
     IDWriteTextFormat *fmt = get_fmt(dip);
     if (!fmt) return false;
@@ -183,11 +184,25 @@ extern "C" bool emoji_render_color(
 
     g_rt->BeginDraw();
 
-    /* Fill with background colour (opaque) */
-    g_rt->Clear(D2D1::ColorF(
-        GetRValue(bg) / 255.0f,
-        GetGValue(bg) / 255.0f,
-        GetBValue(bg) / 255.0f, 1.0f));
+    /* Fill the original cell area with background colour.
+     * When the render target is expanded (w > cell_w), the cell
+     * sits centred inside it — compute its left edge accordingly. */
+    {
+        ID2D1SolidColorBrush *bgbrush = nullptr;
+        g_rt->CreateSolidColorBrush(
+            D2D1::ColorF(
+                GetRValue(bg) / 255.0f,
+                GetGValue(bg) / 255.0f,
+                GetBValue(bg) / 255.0f, 1.0f), &bgbrush);
+        if (bgbrush) {
+            int bg_x = (w - cell_w) / 2;
+            g_rt->FillRectangle(
+                D2D1::RectF((float)bg_x, 0.0f,
+                            (float)(bg_x + cell_w), (float)h),
+                bgbrush);
+            bgbrush->Release();
+        }
+    }
 
     ID2D1SolidColorBrush *brush = nullptr;
     g_rt->CreateSolidColorBrush(
@@ -197,12 +212,13 @@ extern "C" bool emoji_render_color(
             GetBValue(fg) / 255.0f, 1.0f), &brush);
 
     if (brush) {
-        
+
         if (len == 1 && (text[0] >= 0x2600  && text[0] <= 0x26FF || text[0] >= 0x2700  && text[0] <= 0x27BF)) {
             // Misc Symbols
             // Almost wont hit? Misc Symbols most of the time comes with a VarSel
             for_misc_symbols_add_var_sel_fe0f[0] = text[0];
-            for_misc_symbols_add_var_sel_fe0f[1] = L'\xDE00';
+            // was for_misc_symbols_add_var_sel_fe0f[1] = L'\xDE00'; , dont know why
+            for_misc_symbols_add_var_sel_fe0f[1] = (wchar_t)0xFE0F;
             text = for_misc_symbols_add_var_sel_fe0f;
             len = 2;
         } else if (len == 2 && (text[0] >= 0x2600  && text[0] <= 0x26FF || text[0] >= 0x2700  && text[0] <= 0x27BF) && text[1] == 0xFE0F) {
@@ -216,8 +232,7 @@ extern "C" bool emoji_render_color(
             D2D1_DRAW_TEXT_OPTIONS_ENABLE_COLOR_FONT,
             DWRITE_MEASURING_MODE_NATURAL);
         brush->Release();
-        return SUCCEEDED(g_rt->EndDraw());
     }
 
-    return false;
+    return SUCCEEDED(g_rt->EndDraw());
 }
