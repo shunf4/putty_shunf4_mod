@@ -1422,20 +1422,6 @@ static void exact_textout(HDC hdc, int x, int y, CONST RECT *lprc,
 
 
 
-/* Same, but over the double-width fallback fonts (used when a glyph is
- * allowed to overflow a half-width cell). */
-static HFONT find_fallback_font_wide(WinGuiSeat *wgs, HDC hdc,
-                                     const WCHAR *str, int len)
-{
-    for (int i = 0; i < wgs->fallback_font_count; i++) {
-        if (!wgs->fonts_fallback_wide[i])
-            continue;               /* wide variant failed to create */
-        SelectObject(hdc, wgs->fonts_fallback_wide[i]);
-        if (text_has_glyph(hdc, str, len))
-            return wgs->fonts_fallback_wide[i];
-    }
-    return NULL;
-}
 
 /*
  * Draw a half-width character's glyph overflowing into the blank cell
@@ -1461,19 +1447,6 @@ static void overflow_glyph_render(
     another_font(wgs, nfont);
     HFONT use_font = wgs->fonts[nfont];
     SelectObject(hdc, use_font);
-    if (!text_has_glyph(hdc, text, len) && wgs->fallback_font_count > 0) {
-        /*
-         * The main font lacks the glyph.  Prefer the double-width
-         * fallback font so the glyph is sized to fill the two cells we
-         * are about to paint; a single-width fallback glyph would stay
-         * small (e.g. U+26A0 WARNING).
-         */
-        HFONT fb = find_fallback_font_wide(wgs, hdc, text, len);
-        if (!fb)
-            fb = find_fallback_font(wgs, hdc, text, len);
-        if (fb)
-            use_font = fb;
-    }
     SelectObject(hdc, use_font);
 
     RECT ext_box;
