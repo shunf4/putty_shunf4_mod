@@ -1428,6 +1428,8 @@ static HFONT find_fallback_font_wide(WinGuiSeat *wgs, HDC hdc,
                                      const WCHAR *str, int len)
 {
     for (int i = 0; i < wgs->fallback_font_count; i++) {
+        if (!wgs->fonts_fallback_wide[i])
+            continue;               /* wide variant failed to create */
         SelectObject(hdc, wgs->fonts_fallback_wide[i]);
         if (text_has_glyph(hdc, str, len))
             return wgs->fonts_fallback_wide[i];
