@@ -133,17 +133,6 @@ int mk_wcwidth(unsigned int ucs)
     #include "unicode/wide_chars.h"
   };
 
-  /*
-   * A sorted list of intervals of East Asian Ambiguous characters
-   * that should unconditionally be treated as double-width, without
-   * requiring the CJK ambiguous-wide setting. These are safe to
-   * widen because they do not conflict with TUI box-drawing usage:
-   * Roman numerals, arrows, and enclosed alphanumerics.
-   */
-  static const struct interval unconditionally_wide[] = {
-    #include "unicode/unconditionally_wide_chars.h"
-  };
-
   /* test for 8-bit control characters */
   if (ucs == 0)
     return 0;
@@ -162,13 +151,25 @@ int mk_wcwidth(unsigned int ucs)
            sizeof(wide) / sizeof(struct interval) - 1))
     return 2;
 
-  /* binary search in table of unconditionally double-width ambiguous characters */
-  if (bisearch(ucs, unconditionally_wide,
-           sizeof(unconditionally_wide) / sizeof(struct interval) - 1))
-    return 2;
-
   /* normal width character */
   return 1;
+}
+
+
+/*
+ * Is this code point a "glyph-overflow" character: one that is
+ * half-width in the buffer (width 1) but whose typographic glyph is
+ * full-width, so the renderer may spill it into a right-hand blank
+ * cell?  Used by terminal.c to decide whether to permit overflow.
+ */
+bool mk_is_overflow_glyph(unsigned int ucs)
+{
+  static const struct interval overflow[] = {
+    #include "unicode/overflow_glyph_chars.h"
+  };
+
+  return bisearch(ucs, overflow,
+                  sizeof(overflow) / sizeof(struct interval) - 1);
 }
 
 

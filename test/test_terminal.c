@@ -42,9 +42,9 @@ typedef struct Mock {
 
 static bool mock_setup_draw_ctx(TermWin *win) { return false; }
 static void mock_draw_text(TermWin *win, int x, int y, wchar_t *text, int len,
-                           unsigned long attrs, int lattrs, truecolour tc) {}
+                           unsigned long long attrs, int lattrs, truecolour tc) {}
 static void mock_draw_cursor(TermWin *win, int x, int y, wchar_t *text,
-                             int len, unsigned long attrs, int lattrs,
+                             int len, unsigned long long attrs, int lattrs,
                              truecolour tc) {}
 static void mock_set_raw_mouse_mode(TermWin *win, bool enable) {}
 static void mock_set_raw_mouse_mode_pointer(TermWin *win, bool enable) {}

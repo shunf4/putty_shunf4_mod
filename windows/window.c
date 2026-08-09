@@ -157,9 +157,9 @@ struct WinGuiSeatListNode wgslisthead = {
 
 static bool wintw_setup_draw_ctx(TermWin *);
 static void wintw_draw_text(TermWin *, int x, int y, wchar_t *text, int len,
-                            unsigned long attrs, int lattrs, truecolour tc);
+                            unsigned long long attrs, int lattrs, truecolour tc);
 static void wintw_draw_cursor(TermWin *, int x, int y, wchar_t *text, int len,
-                              unsigned long attrs, int lattrs, truecolour tc);
+                              unsigned long long attrs, int lattrs, truecolour tc);
 static void wintw_draw_trust_sigil(TermWin *, int x, int y);
 static int wintw_char_width(TermWin *, int uc);
 static void wintw_free_draw_ctx(TermWin *);
@@ -1421,6 +1421,73 @@ static void exact_textout(HDC hdc, int x, int y, CONST RECT *lprc,
 }
 
 
+
+/* Same, but over the double-width fallback fonts (used when a glyph is
+ * allowed to overflow a half-width cell). */
+static HFONT find_fallback_font_wide(WinGuiSeat *wgs, HDC hdc,
+                                     const WCHAR *str, int len)
+{
+    for (int i = 0; i < wgs->fallback_font_count; i++) {
+        SelectObject(hdc, wgs->fonts_fallback_wide[i]);
+        if (text_has_glyph(hdc, str, len))
+            return wgs->fonts_fallback_wide[i];
+    }
+    return NULL;
+}
+
+/*
+ * Draw a half-width character's glyph overflowing into the blank cell
+ * on its right.  The cell is at pixel offset |seg_x| and is |cell_w|
+ * wide; we render the glyph using a doubled advance so the full-width
+ * glyph (from the main font, or from a fallback font if the main font
+ * lacks it) fills both cells.  This is shared between the normal path
+ * (a character that is simply overflowable) and the fallback path (a
+ * character whose main-font glyph is missing, e.g. U+26A0 WARNING).
+ */
+static void overflow_glyph_render(
+    WinGuiSeat *wgs, HDC hdc, int y, int seg_x, int cell_w,
+    const RECT *line_box, wchar_t *text, int len,
+    int nfont, COLORREF fg, COLORREF bg)
+{
+    int term_right = wgs->font_width * wgs->term->cols + wgs->offset_width;
+    int target_w = cell_w * 2;             /* borrow one cell */
+    if (seg_x + target_w > term_right)
+        target_w = term_right - seg_x;
+    if (target_w <= cell_w)
+        return;                            /* no room: fall back to squeeze */
+
+    another_font(wgs, nfont);
+    HFONT use_font = wgs->fonts[nfont];
+    SelectObject(hdc, use_font);
+    if (!text_has_glyph(hdc, text, len) && wgs->fallback_font_count > 0) {
+        /*
+         * The main font lacks the glyph.  Prefer the double-width
+         * fallback font so the glyph is sized to fill the two cells we
+         * are about to paint; a single-width fallback glyph would stay
+         * small (e.g. U+26A0 WARNING).
+         */
+        HFONT fb = find_fallback_font_wide(wgs, hdc, text, len);
+        if (!fb)
+            fb = find_fallback_font(wgs, hdc, text, len);
+        if (fb)
+            use_font = fb;
+    }
+    SelectObject(hdc, use_font);
+
+    RECT ext_box;
+    ext_box.left = seg_x;
+    ext_box.top = line_box->top;
+    ext_box.bottom = line_box->bottom;
+    ext_box.right = seg_x + target_w;
+
+    INT wide_dx[2] = { target_w, 0 };
+    SetTextColor(hdc, fg);
+    SetBkColor(hdc, bg);
+    SetBkMode(hdc, OPAQUE);
+    ExtTextOutW(hdc, seg_x, y, ETO_CLIPPED | ETO_OPAQUE, &ext_box,
+                text, len, wide_dx);
+    SetBkMode(hdc, TRANSPARENT);
+}
 
 /*
  * The exact_textout() wrapper, unfortunately, destroys the useful
@@ -3846,7 +3913,7 @@ static void draw_horizontal_line_on_text(
  */
 static void do_text_internal(
     WinGuiSeat *wgs, int x, int y, wchar_t *text, int len,
-    unsigned long attr, int lattr, truecolour truecolour)
+    unsigned long long attr, int lattr, truecolour truecolour)
 {
     COLORREF fg, bg, t;
     int nfg, nbg, nfont;
@@ -4058,6 +4125,19 @@ static void do_text_internal(
     }
 
     opaque = true;                     /* start by erasing the rectangle */
+    if (attr & ATTR_NO_BG) {
+        /*
+         * This cell is blank but borrowed by an overflowing left
+         * neighbour, whose glyph already extends into us.  Suppress
+         * our own background erase so we don't wipe it out.  Setting
+         * TRANSPARENT here (not just dropping ETO_OPAQUE) matters:
+         * the DIRECT_FONT branch below draws via ExtTextOut without
+         * calling SetBkMode itself, so it would inherit OPAQUE and
+         * fill the background regardless of the ETO_OPAQUE flag.
+         */
+        opaque = false;
+        SetBkMode(wgs->wintw_hdc, TRANSPARENT);
+    }
     for (remaining = len; remaining > 0;
          text += len, remaining -= len, x += char_width * len2) {
         len = (maxlen < remaining ? maxlen : remaining);
@@ -4225,11 +4305,11 @@ static void do_text_internal(
  */
 static void wintw_draw_text(
     TermWin *tw, int x, int y, wchar_t *text, int len,
-    unsigned long attr, int lattr, truecolour truecolour)
+    unsigned long long attr, int lattr, truecolour truecolour)
 {
     WinGuiSeat *wgs = container_of(tw, WinGuiSeat, termwin);
     if (attr & TATTR_COMBINING) {
-        unsigned long a = 0;
+        unsigned long long a = 0;
         int len0 = 1;
         /* don't divide SURROGATE PAIR and VARIATION SELECTOR */
         if (len >= 2 && IS_SURROGATE_PAIR(text[0], text[1]))
@@ -4269,7 +4349,7 @@ static void wintw_draw_text(
 
 static void wintw_draw_cursor(
     TermWin *tw, int x, int y, wchar_t *text, int len,
-    unsigned long attr, int lattr, truecolour truecolour)
+    unsigned long long attr, int lattr, truecolour truecolour)
 {
     WinGuiSeat *wgs = container_of(tw, WinGuiSeat, termwin);
     int fnt_width;
