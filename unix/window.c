@@ -3842,7 +3842,7 @@ static void draw_backing_rect(GtkFrontend *inst)
  */
 static void do_text_internal(
     GtkFrontend *inst, int x, int y, wchar_t *text, int len,
-    unsigned long attr, int lattr, truecolour truecolour)
+    unsigned long long attr, int lattr, truecolour truecolour)
 {
     int ncombining;
     int nfg, nbg, t, fontid, rlen, widefactor;
@@ -4010,7 +4010,7 @@ static void do_text_internal(
 
 static void gtkwin_draw_text(
     TermWin *tw, int x, int y, wchar_t *text, int len,
-    unsigned long attr, int lattr, truecolour truecolour)
+    unsigned long long attr, int lattr, truecolour truecolour)
 {
     GtkFrontend *inst = container_of(tw, GtkFrontend, termwin);
     int widefactor;
@@ -4040,7 +4040,7 @@ static void gtkwin_draw_text(
 
 static void gtkwin_draw_cursor(
     TermWin *tw, int x, int y, wchar_t *text, int len,
-    unsigned long attr, int lattr, truecolour truecolour)
+    unsigned long long attr, int lattr, truecolour truecolour)
 {
     GtkFrontend *inst = container_of(tw, GtkFrontend, termwin);
     bool active, passive;
