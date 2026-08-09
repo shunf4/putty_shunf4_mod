@@ -30,7 +30,7 @@ struct termchar {
      * saying FULL-TERMCHAR.
      */
     unsigned long chr;
-    unsigned long attr;
+    unsigned long long attr;
     truecolour truecolour;
 
     /*
@@ -230,7 +230,7 @@ struct terminal_tag {
     short wordness[256];
 
     /* Mask of attributes to pay attention to when painting. */
-    int attr_mask;
+    unsigned long long attr_mask;
 
     wchar_t *paste_buffer;
     size_t paste_len, paste_pos;

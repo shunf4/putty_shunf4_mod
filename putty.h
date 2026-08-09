@@ -264,15 +264,23 @@ extern const int colour_indices_oscp_to_osc4[OSCP_NCOLOURS];
 #define ATTR_COLOURS 0x0003FFFFU
 #define ATTR_DIM     0x01000000U
 #define ATTR_STRIKE  0x02000000U
-#define ATTR_OVERFLOW_OK 0x04000000U   /* half-width cell whose wide glyph may
-                                        * overflow into a right-hand blank cell
-                                        * at render time */
-#define ATTR_NO_BG      0x08000000U    /* don't erase the background when
-                                        * drawing this cell: it is borrowed
-                                        * by an overflowing left neighbour */
 #define ATTR_ACTCURS 0x40000000UL      /* active cursor (block) */
 #define ATTR_PASCURS 0x20000000UL      /* passive cursor (box) */
 #define ATTR_RIGHTCURS 0x10000000UL    /* cursor-on-RHS */
+
+/*
+ * Attribute words are unsigned 64-bit.  The low 32 bits hold the
+ * historical ATTR_ * / LATTR_* / TATTR_* flags and colours; bits 32 and
+ * above are used for newer render-only flags so that they never
+ * collide with the crowded low space.
+ */
+#define ATTR_HIGH_SHIFT 32
+#define ATTR_OVERFLOW_OK (1ULL << (ATTR_HIGH_SHIFT + 0))
+    /* half-width cell whose wide glyph may overflow into a right-hand
+     * blank cell at render time */
+#define ATTR_NO_BG (1ULL << (ATTR_HIGH_SHIFT + 1))
+    /* don't erase the background when drawing this cell: it is borrowed
+     * by an overflowing left neighbour */
 #define ATTR_FGSHIFT 0
 #define ATTR_BGSHIFT 9
 
@@ -1625,14 +1633,14 @@ struct TermWinVtable {
     bool (*setup_draw_ctx)(TermWin *);
     /* Draw text in the window, during a painting operation */
     void (*draw_text)(TermWin *, int x, int y, wchar_t *text, int len,
-                      unsigned long attrs, int line_attrs, truecolour tc);
+                      unsigned long long attrs, int line_attrs, truecolour tc);
     /* Draw the visible cursor. Expects you to have called do_text
      * first (because it might just draw an underline over a character
      * presumed to exist already), but also expects you to pass in all
      * the details of the character under the cursor (because it might
      * redraw it in different colours). */
     void (*draw_cursor)(TermWin *, int x, int y, wchar_t *text, int len,
-                        unsigned long attrs, int line_attrs, truecolour tc);
+                        unsigned long long attrs, int line_attrs, truecolour tc);
     /* Draw the sigil indicating that a line of text has come from
      * PuTTY itself rather than the far end (defence against end-of-
      * authentication spoofing) */
@@ -1713,11 +1721,11 @@ static inline bool win_setup_draw_ctx(TermWin *win)
 { return win->vt->setup_draw_ctx(win); }
 static inline void win_draw_text(
     TermWin *win, int x, int y, wchar_t *text, int len,
-    unsigned long attrs, int line_attrs, truecolour tc)
+    unsigned long long attrs, int line_attrs, truecolour tc)
 { win->vt->draw_text(win, x, y, text, len, attrs, line_attrs, tc); }
 static inline void win_draw_cursor(
     TermWin *win, int x, int y, wchar_t *text, int len,
-    unsigned long attrs, int line_attrs, truecolour tc)
+    unsigned long long attrs, int line_attrs, truecolour tc)
 { win->vt->draw_cursor(win, x, y, text, len, attrs, line_attrs, tc); }
 static inline void win_draw_trust_sigil(TermWin *win, int x, int y)
 { win->vt->draw_trust_sigil(win, x, y); }

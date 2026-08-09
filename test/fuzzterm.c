@@ -42,11 +42,11 @@ int main(int argc, char **argv)
 static bool fuzz_setup_draw_ctx(TermWin *tw) { return true; }
 static void fuzz_draw_text(
     TermWin *tw, int x, int y, wchar_t *text, int len,
-    unsigned long attr, int lattr, truecolour tc)
+    unsigned long long attr, int lattr, truecolour tc)
 {
     int i;
 
-    printf("TEXT[attr=%08lx,lattr=%02x]@(%d,%d):", attr, lattr, x, y);
+    printf("TEXT[attr=%016llx,lattr=%02x]@(%d,%d):", attr, lattr, x, y);
     for (i = 0; i < len; i++) {
         printf(" %x", (unsigned)text[i]);
     }
@@ -54,11 +54,11 @@ static void fuzz_draw_text(
 }
 static void fuzz_draw_cursor(
     TermWin *tw, int x, int y, wchar_t *text, int len,
-    unsigned long attr, int lattr, truecolour tc)
+    unsigned long long attr, int lattr, truecolour tc)
 {
     int i;
 
-    printf("CURS[attr=%08lx,lattr=%02x]@(%d,%d):", attr, lattr, x, y);
+    printf("CURS[attr=%016llx,lattr=%02x]@(%d,%d):", attr, lattr, x, y);
     for (i = 0; i < len; i++) {
         printf(" %x", (unsigned)text[i]);
     }

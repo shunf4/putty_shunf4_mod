@@ -660,7 +660,15 @@ static void makeliteral_attr(strbuf *b, termchar *c, unsigned long *state)
      */
     unsigned attr, colourbits;
 
-    attr = c->attr;
+    /*
+     * The scrollback compression format stores only the low 32 bits
+     * of the attribute word (the SGR colours and styles).  The high
+     * bits are per-frame render flags (ATTR_OVERFLOW_OK/ATTR_NO_BG)
+     * which are recomputed on every repaint, so they are intentionally
+     * not persisted.  Mask them off so the 32-bit bit-twiddling below
+     * stays correct.
+     */
+    attr = (unsigned)(c->attr & 0xFFFFFFFFUL);
 
     assert(ATTR_BGSHIFT > ATTR_FGSHIFT);
 
@@ -2110,7 +2118,7 @@ Terminal *term_init(Conf *myconf, struct unicode_data *ucsdata, TermWin *win)
     deselect(term);
     term->rows = term->cols = -1;
     power_on(term, true);
-    term->attr_mask = 0xffffffff;
+    term->attr_mask = ~0ULL;   /* pay attention to all 64 attribute bits */
 
     /* FULL-TERMCHAR */
     term->basic_erase_char.chr = CSET_ASCII | ' ';
@@ -6070,7 +6078,7 @@ static termchar *term_bidi_line(Terminal *term, struct termline *ldata,
 
 static void do_paint_draw(Terminal *term, termline *ldata, int x, int y,
                           wchar_t *ch, int ccount,
-                          unsigned long attr, truecolour tc)
+                          unsigned long long attr, truecolour tc)
 {
     if (ch[0] == TRUST_SIGIL_CHAR) {
         assert(ldata->trusted);
@@ -6166,7 +6174,7 @@ static void do_paint(Terminal *term)
         termline *ldata;
         termchar *lchars;
         bool dirty_line, dirty_run, selected;
-        unsigned long attr = 0, cset = 0;
+        unsigned long long attr = 0, cset = 0;
         int start = 0;
         int ccount = 0;
         bool last_run_dirty = false;
@@ -6210,7 +6218,7 @@ static void do_paint(Terminal *term)
          * each character cell to look like.
          */
         for (j = 0; j < term->cols; j++) {
-            unsigned long tattr, tchar;
+            unsigned long long tattr, tchar;
             termchar *d = lchars + j;
             bool in_preedit = j >= preedit_start && j < preedit_end;
             scrpos.x = backward ? backward[j] : j;
@@ -6399,7 +6407,7 @@ static void do_paint(Terminal *term)
 
         tc = term->erase_char.truecolour;
         for (j = 0; j < term->cols; j++) {
-            unsigned long tattr, tchar;
+            unsigned long long tattr, tchar;
             bool break_run, do_copy, next_run_dirty = false;
             termchar *d = lchars + j;
             bool in_preedit = j >= preedit_start && j < preedit_end;

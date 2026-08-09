@@ -157,9 +157,9 @@ struct WinGuiSeatListNode wgslisthead = {
 
 static bool wintw_setup_draw_ctx(TermWin *);
 static void wintw_draw_text(TermWin *, int x, int y, wchar_t *text, int len,
-                            unsigned long attrs, int lattrs, truecolour tc);
+                            unsigned long long attrs, int lattrs, truecolour tc);
 static void wintw_draw_cursor(TermWin *, int x, int y, wchar_t *text, int len,
-                              unsigned long attrs, int lattrs, truecolour tc);
+                              unsigned long long attrs, int lattrs, truecolour tc);
 static void wintw_draw_trust_sigil(TermWin *, int x, int y);
 static int wintw_char_width(TermWin *, int uc);
 static void wintw_free_draw_ctx(TermWin *);
@@ -3988,7 +3988,7 @@ static void draw_horizontal_line_on_text(
  */
 static void do_text_internal(
     WinGuiSeat *wgs, int x, int y, wchar_t *text, int len,
-    unsigned long attr, int lattr, truecolour truecolour)
+    unsigned long long attr, int lattr, truecolour truecolour)
 {
     COLORREF fg, bg, t;
     int nfg, nbg, nfont;
@@ -4465,11 +4465,11 @@ static void do_text_internal(
  */
 static void wintw_draw_text(
     TermWin *tw, int x, int y, wchar_t *text, int len,
-    unsigned long attr, int lattr, truecolour truecolour)
+    unsigned long long attr, int lattr, truecolour truecolour)
 {
     WinGuiSeat *wgs = container_of(tw, WinGuiSeat, termwin);
     if (attr & TATTR_COMBINING) {
-        unsigned long a = 0;
+        unsigned long long a = 0;
         int len0 = 1;
         /* don't divide SURROGATE PAIR and VARIATION SELECTOR */
         if (len >= 2 && IS_SURROGATE_PAIR(text[0], text[1]))
@@ -4509,7 +4509,7 @@ static void wintw_draw_text(
 
 static void wintw_draw_cursor(
     TermWin *tw, int x, int y, wchar_t *text, int len,
-    unsigned long attr, int lattr, truecolour truecolour)
+    unsigned long long attr, int lattr, truecolour truecolour)
 {
     WinGuiSeat *wgs = container_of(tw, WinGuiSeat, termwin);
     int fnt_width;
