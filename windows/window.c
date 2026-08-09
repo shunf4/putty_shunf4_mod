@@ -1452,6 +1452,8 @@ static HFONT find_fallback_font_wide(WinGuiSeat *wgs, HDC hdc,
                                      const WCHAR *str, int len)
 {
     for (int i = 0; i < wgs->fallback_font_count; i++) {
+        if (!wgs->fonts_fallback_wide[i])
+            continue;               /* wide variant failed to create */
         SelectObject(hdc, wgs->fonts_fallback_wide[i]);
         if (text_has_glyph(hdc, str, len))
             return wgs->fonts_fallback_wide[i];
@@ -1862,7 +1864,7 @@ static void init_fonts(WinGuiSeat *wgs, int pick_width, int pick_height)
 
     /* Create fallback fonts for characters not in the main font */
     {
-        static const WCHAR *const fallback_names[] = {
+        static const WCHAR *const fallback_font_names[] = {
             // L"Segoe UI Symbol",
             // L"Cambria Math",
             // L"Arial Unicode MS",
@@ -1874,13 +1876,22 @@ static void init_fonts(WinGuiSeat *wgs, int pick_width, int pick_height)
             L"Lucida Sans Unicode",
         };
         wgs->fallback_font_count = 0;
-        for (int fi = 0; fi < FALLBACK_FONTS_MAX; fi++) {
+        /*
+         * Loop over the names actually in fallback_font_names[], not the
+         * fixed FALLBACK_FONTS_MAX: the array may hold fewer entries
+         * (some are commented out), and indexing past it would pass a
+         * garbage face name to CreateFontW and crash.
+         */
+        int n_fallback = lenof(fallback_font_names);
+        if (n_fallback > FALLBACK_FONTS_MAX)
+            n_fallback = FALLBACK_FONTS_MAX;
+        for (int fi = 0; fi < n_fallback; fi++) {
             wgs->fonts_fallback[fi] = CreateFontW(
                 wgs->font_height, wgs->font_width, 0, 0, FW_DONTCARE,
                 false, false, false, DEFAULT_CHARSET,
                 OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
                 FONT_QUALITY(quality),
-                FIXED_PITCH | FF_DONTCARE, fallback_names[fi]);
+                FIXED_PITCH | FF_DONTCARE, fallback_font_names[fi]);
             /*
              * Also make a double-width variant of each fallback font,
              * used when a half-width character's glyph is missing from
@@ -1893,7 +1904,7 @@ static void init_fonts(WinGuiSeat *wgs, int pick_width, int pick_height)
                 false, false, false, DEFAULT_CHARSET,
                 OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
                 FONT_QUALITY(quality),
-                FIXED_PITCH | FF_DONTCARE, fallback_names[fi]);
+                FIXED_PITCH | FF_DONTCARE, fallback_font_names[fi]);
             if (wgs->fonts_fallback[fi])
                 wgs->fallback_font_count++;
             else
