@@ -264,6 +264,12 @@ extern const int colour_indices_oscp_to_osc4[OSCP_NCOLOURS];
 #define ATTR_COLOURS 0x0003FFFFU
 #define ATTR_DIM     0x01000000U
 #define ATTR_STRIKE  0x02000000U
+#define ATTR_OVERFLOW_OK 0x04000000U   /* half-width cell whose wide glyph may
+                                        * overflow into a right-hand blank cell
+                                        * at render time */
+#define ATTR_NO_BG      0x08000000U    /* don't erase the background when
+                                        * drawing this cell: it is borrowed
+                                        * by an overflowing left neighbour */
 #define ATTR_ACTCURS 0x40000000UL      /* active cursor (block) */
 #define ATTR_PASCURS 0x20000000UL      /* passive cursor (box) */
 #define ATTR_RIGHTCURS 0x10000000UL    /* cursor-on-RHS */
@@ -2301,6 +2307,7 @@ int mk_wcwidth(unsigned int ucs);
 int mk_wcswidth(const unsigned int *pwcs, size_t n);
 int mk_wcwidth_cjk(unsigned int ucs);
 int mk_wcswidth_cjk(const unsigned int *pwcs, size_t n);
+bool mk_is_overflow_glyph(unsigned int ucs);
 
 /*
  * Exports from agent-client.c in platform subdirs.

@@ -1446,6 +1446,73 @@ static HFONT find_fallback_font(WinGuiSeat *wgs, HDC hdc,
     return NULL;
 }
 
+/* Same, but over the double-width fallback fonts (used when a glyph is
+ * allowed to overflow a half-width cell). */
+static HFONT find_fallback_font_wide(WinGuiSeat *wgs, HDC hdc,
+                                     const WCHAR *str, int len)
+{
+    for (int i = 0; i < wgs->fallback_font_count; i++) {
+        SelectObject(hdc, wgs->fonts_fallback_wide[i]);
+        if (text_has_glyph(hdc, str, len))
+            return wgs->fonts_fallback_wide[i];
+    }
+    return NULL;
+}
+
+/*
+ * Draw a half-width character's glyph overflowing into the blank cell
+ * on its right.  The cell is at pixel offset |seg_x| and is |cell_w|
+ * wide; we render the glyph using a doubled advance so the full-width
+ * glyph (from the main font, or from a fallback font if the main font
+ * lacks it) fills both cells.  This is shared between the normal path
+ * (a character that is simply overflowable) and the fallback path (a
+ * character whose main-font glyph is missing, e.g. U+26A0 WARNING).
+ */
+static void overflow_glyph_render(
+    WinGuiSeat *wgs, HDC hdc, int y, int seg_x, int cell_w,
+    const RECT *line_box, wchar_t *text, int len,
+    int nfont, COLORREF fg, COLORREF bg)
+{
+    int term_right = wgs->font_width * wgs->term->cols + wgs->offset_width;
+    int target_w = cell_w * 2;             /* borrow one cell */
+    if (seg_x + target_w > term_right)
+        target_w = term_right - seg_x;
+    if (target_w <= cell_w)
+        return;                            /* no room: fall back to squeeze */
+
+    another_font(wgs, nfont);
+    HFONT use_font = wgs->fonts[nfont];
+    SelectObject(hdc, use_font);
+    if (!text_has_glyph(hdc, text, len) && wgs->fallback_font_count > 0) {
+        /*
+         * The main font lacks the glyph.  Prefer the double-width
+         * fallback font so the glyph is sized to fill the two cells we
+         * are about to paint; a single-width fallback glyph would stay
+         * small (e.g. U+26A0 WARNING).
+         */
+        HFONT fb = find_fallback_font_wide(wgs, hdc, text, len);
+        if (!fb)
+            fb = find_fallback_font(wgs, hdc, text, len);
+        if (fb)
+            use_font = fb;
+    }
+    SelectObject(hdc, use_font);
+
+    RECT ext_box;
+    ext_box.left = seg_x;
+    ext_box.top = line_box->top;
+    ext_box.bottom = line_box->bottom;
+    ext_box.right = seg_x + target_w;
+
+    INT wide_dx[2] = { target_w, 0 };
+    SetTextColor(hdc, fg);
+    SetBkColor(hdc, bg);
+    SetBkMode(hdc, OPAQUE);
+    ExtTextOutW(hdc, seg_x, y, ETO_CLIPPED | ETO_OPAQUE, &ext_box,
+                text, len, wide_dx);
+    SetBkMode(hdc, TRANSPARENT);
+}
+
 /*
  * The exact_textout() wrapper, unfortunately, destroys the useful
  * Windows `font linking' behaviour: automatic handling of Unicode
@@ -1800,16 +1867,29 @@ static void init_fonts(WinGuiSeat *wgs, int pick_width, int pick_height)
             // L"Cambria Math",
             // L"Arial Unicode MS",
             // L"DejaVu Sans",
+            L"Segoe UI Emoji",
+            L"Segoe UI Symbol",
             L"Dejavu Sans Mono",
             L"Noto Sans Mono",
-            L"Segoe UI",
-            L"Segoe UI Symbol",
             L"Lucida Sans Unicode",
         };
         wgs->fallback_font_count = 0;
         for (int fi = 0; fi < FALLBACK_FONTS_MAX; fi++) {
             wgs->fonts_fallback[fi] = CreateFontW(
                 wgs->font_height, wgs->font_width, 0, 0, FW_DONTCARE,
+                false, false, false, DEFAULT_CHARSET,
+                OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+                FONT_QUALITY(quality),
+                FIXED_PITCH | FF_DONTCARE, fallback_names[fi]);
+            /*
+             * Also make a double-width variant of each fallback font,
+             * used when a half-width character's glyph is missing from
+             * the main font but is allowed to overflow (e.g. U+26A0):
+             * the wider nWidth lets GDI size the glyph to fill both
+             * cells instead of leaving it small.
+             */
+            wgs->fonts_fallback_wide[fi] = CreateFontW(
+                wgs->font_height, wgs->font_width * 2, 0, 0, FW_DONTCARE,
                 false, false, false, DEFAULT_CHARSET,
                 OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
                 FONT_QUALITY(quality),
@@ -1889,7 +1969,10 @@ static void deinit_fonts(WinGuiSeat *wgs)
     for (i = 0; i < wgs->fallback_font_count; i++) {
         if (wgs->fonts_fallback[i])
             DeleteObject(wgs->fonts_fallback[i]);
+        if (wgs->fonts_fallback_wide[i])
+            DeleteObject(wgs->fonts_fallback_wide[i]);
         wgs->fonts_fallback[i] = NULL;
+        wgs->fonts_fallback_wide[i] = NULL;
     }
     wgs->fallback_font_count = 0;
 
@@ -4117,6 +4200,19 @@ static void do_text_internal(
     }
 
     opaque = true;                     /* start by erasing the rectangle */
+    if (attr & ATTR_NO_BG) {
+        /*
+         * This cell is blank but borrowed by an overflowing left
+         * neighbour, whose glyph already extends into us.  Suppress
+         * our own background erase so we don't wipe it out.  Setting
+         * TRANSPARENT here (not just dropping ETO_OPAQUE) matters:
+         * the DIRECT_FONT branch below draws via ExtTextOut without
+         * calling SetBkMode itself, so it would inherit OPAQUE and
+         * fill the background regardless of the ETO_OPAQUE flag.
+         */
+        opaque = false;
+        SetBkMode(wgs->wintw_hdc, TRANSPARENT);
+    }
     for (remaining = len; remaining > 0;
          text += len, remaining -= len, x += char_width * len2) {
         len = (maxlen < remaining ? maxlen : remaining);
@@ -4256,6 +4352,25 @@ static void do_text_internal(
             }
 
             /*
+             * Glyph overflow: a half-width cell whose glyph is
+             * full-width may spill into the blank cell on its right.
+             * The batch render above drew it squeezed into the single
+             * cell; here we redraw it with the normal (unscaled) font
+             * across an expanded, centred rectangle so the full glyph
+             * is visible.  The background is refilled across the whole
+             * expanded rectangle first.
+             */
+            if (attr & ATTR_OVERFLOW_OK) {
+                int seg_x = x + xoffset;
+                overflow_glyph_render(
+                    wgs, wgs->wintw_hdc,
+                    y - wgs->font_height *
+                        (lattr == LATTR_BOT) + text_adjust,
+                    seg_x, char_width, &line_box, wbuf, len,
+                    nfont, fg, bg);
+            }
+
+            /*
              * Font fallback: overdraw missing glyphs with a fallback
              * font.  We first render everything with the main font
              * (which draws boxes for missing glyphs), then overdraw
@@ -4272,6 +4387,19 @@ static void do_text_internal(
                     if (i + 1 < len && IS_SURROGATE_PAIR(wbuf[i], wbuf[i+1]))
                         clen = 2;
                     if (glyph_idx[i] == 0xFFFF || glyph_idx[i] == 0) {
+                        /*
+                         * If this run is an overflow cell, the normal
+                         * path already drew the full glyph (possibly
+                         * from a fallback font, via overflow_glyph_render)
+                         * across both cells, so there is nothing more
+                         * to do here.  The batch render above only drew
+                         * a box for the missing glyph, which the overflow
+                         * redraw has covered.
+                         */
+                        if (attr & ATTR_OVERFLOW_OK) {
+                            i += clen;
+                            continue;
+                        }
                         HFONT fb = find_fallback_font(
                             wgs, wgs->wintw_hdc, &wbuf[i], clen);
                         if (fb) {

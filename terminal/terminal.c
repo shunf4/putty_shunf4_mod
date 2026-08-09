@@ -210,6 +210,46 @@ static void cc_check(termline *line)
 static void clear_cc(termline *line, int col);
 
 /*
+ * Glyph-overflow support.
+ *
+ * Some characters are designed with a full-width glyph but kept
+ * half-width in the terminal buffer (so TUI applications that assume
+ * width 1 are not broken).  At render time the renderer may let such a
+ * glyph spill into a neighbouring blank cell on the right.  The set of
+ * overflowable code points is provided by wcwidth.c (mk_is_overflow_
+ * glyph); here we only need to recognise blank cells.
+ */
+
+/* Is the given cell a blank into which an overflowing glyph may
+ * safely spill?  We look only at the character code point, not its
+ * attributes, because an overflow into a coloured-but-blank cell is
+ * still acceptable (the spilling glyph keeps its own background only
+ * within its own cell). */
+static bool cell_is_blank_for_overflow(const termchar *c)
+{
+    unsigned long chr = c->chr;
+    if (chr == UCSWIDE)
+        return false;
+    /* Characters entered via a CSET (e.g. ASCII SPACE stored as
+     * CSET_ASCII|0x20) carry the charset in the high byte; strip it
+     * to recover the bare code point.  Plain UTF-8 characters carry
+     * no CSET and are already bare code points. */
+    unsigned int cp;
+    if ((chr & CSET_MASK) == CSET_ASCII ||
+        (chr & CSET_MASK) == CSET_LINEDRW ||
+        (chr & CSET_MASK) == CSET_SCOACS)
+        cp = (unsigned int)(chr & ~CSET_MASK);
+    else
+        cp = (unsigned int)chr;
+    return
+        cp == 0x20 ||   /* SPACE */
+        cp == 0xA0 ||   /* NO-BREAK SPACE */
+        (cp >= 0x2002 && cp <= 0x2006) ||  /* en/em/... spaces */
+        cp == 0x2009 || /* THIN SPACE */
+        cp == 0x3000;   /* IDEOGRAPHIC SPACE */
+}
+
+/*
  * Add a combining character to a character cell.
  */
 static void add_cc(termline *line, int col, unsigned long chr)
@@ -3427,6 +3467,34 @@ static void term_display_graphic_char(Terminal *term, unsigned long c)
                 x--;
             }
 
+            /*
+             * U+FE0F (Variation Selector 16) requests emoji
+             * presentation of the preceding character.  Per UAX #11
+             * an emoji-presentation sequence behaves as East Asian
+             * Wide, so we promote the preceding half-width base
+             * character to a full-width one (occupying two cells)
+             * before attaching the VS16 as a combining mark.
+             *
+             * Promotion is only done when it is safe: the base must
+             * currently be half-width, and the cell immediately to
+             * its right must be a blank erase cell (so we don't
+             * clobber a real character) that is not the last column
+             * of the line.  Otherwise VS16 is attached as an ordinary
+             * combining mark and the base stays half-width.
+             */
+            if (c == 0xFE0F &&
+                cline->chars[x].chr != UCSWIDE &&
+                x + 1 < linecols - 1 &&
+                term_char_width(term, cline->chars[x].chr) == 1 &&
+                (cline->chars[x + 1].chr == (CSET_ASCII | ' ') ||
+                 cline->chars[x + 1].chr == ' ')) {
+                clear_cc(cline, x + 1);
+                cline->chars[x + 1].chr = UCSWIDE;
+                cline->chars[x + 1].attr = cline->chars[x].attr;
+                cline->chars[x + 1].truecolour =
+                    cline->chars[x].truecolour;
+            }
+
             add_cc(cline, x, c);
             seen_disp_event(term);
         }
@@ -6211,16 +6279,66 @@ static void do_paint(Terminal *term)
 
             /*
              * Check the font we'll _probably_ be using to see if
-             * the character is wide when we don't want it to be.
+             * the character is wide when we don't want it to be, and
+             * decide how to render a half-width cell whose glyph is
+             * full-width.
              */
-            if (tchar != term->disptext[i]->chars[j].chr ||
-                tattr != (term->disptext[i]->chars[j].attr &~
-                          (ATTR_NARROW | DATTR_MASK))) {
-                if ((tattr & ATTR_WIDE) == 0 &&
-                    win_char_width(term->win, tchar) == 2)
+            tattr &= ~(ATTR_NARROW | ATTR_OVERFLOW_OK);
+            bool cell_changed =
+                (tchar != term->disptext[i]->chars[j].chr ||
+                 tattr != (term->disptext[i]->chars[j].attr &~
+                           (ATTR_NARROW | ATTR_OVERFLOW_OK | DATTR_MASK)));
+            bool font_says_wide =
+                ((tattr & ATTR_WIDE) == 0 &&
+                 win_char_width(term->win, tchar) == 2);
+            if (cell_changed) {
+                if (font_says_wide)
                     tattr |= ATTR_NARROW;
-            } else if (term->disptext[i]->chars[j].attr & ATTR_NARROW)
+            } else if (term->disptext[i]->chars[j].attr & ATTR_NARROW) {
                 tattr |= ATTR_NARROW;
+            }
+
+            /*
+             * Glyph-overflow decision, always re-evaluated (it depends
+             * on the right-hand neighbour, which may change
+             * independently of this cell).  Any overflow-capable
+             * half-width character (arrows, enclosed alphanumerics,
+             * default-text-style emoji such as U+26A0, ...) may spill
+             * its glyph into a blank right-hand cell; when that isn't
+             * possible, full-width-glyph characters are squeezed
+             * (ATTR_NARROW) and naturally-half-width ones are left as
+             * a plain single-cell render.
+             */
+            if ((tattr & ATTR_WIDE) == 0 &&
+                mk_is_overflow_glyph((unsigned int)tchar)) {
+                /*
+                 * Overflow only into a genuine blank cell on the right.
+                 * The end of the line is NOT a valid overflow target:
+                 * there is no cell there to borrow, so attempting to
+                 * overflow into the right margin would clip the glyph.
+                 */
+                bool can_overflow =
+                    (j + 1 < term->cols) &&
+                    cell_is_blank_for_overflow(&d[1]);
+                if (can_overflow) {
+                    tattr &= ~ATTR_NARROW;
+                    tattr |= ATTR_OVERFLOW_OK;
+                } else if (font_says_wide) {
+                    tattr |= ATTR_NARROW;
+                }
+            }
+
+            /*
+             * If this cell is blank and the cell to its left is
+             * overflowing into us, suppress our own background erase
+             * so we don't wipe out the overflowing glyph.
+             */
+            if (j > 0 &&
+                (newline[j - 1].attr & ATTR_OVERFLOW_OK) &&
+                !(tattr & ATTR_OVERFLOW_OK) &&
+                cell_is_blank_for_overflow(d)) {
+                tattr |= ATTR_NO_BG;
+            }
 
             if (i == our_curs_y && j == our_curs_x)
                 tattr |= cursor;
