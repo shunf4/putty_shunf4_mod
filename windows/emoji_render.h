@@ -24,8 +24,12 @@ void emoji_renderer_cleanup(void);
  * and the strings it points to must remain valid until cleanup. */
 void emoji_renderer_set_fonts(const WCHAR *const *names, int count);
 
-/* Heuristic: is this Unicode codepoint likely to be a color-emoji glyph? */
-bool emoji_is_color_candidate(unsigned int uc);
+/* Should this code point be rendered as colour emoji?  Covers the
+ * broad emoji blocks plus extra code points recorded in
+ * unicode/force_color_emoji_chars.h (default-text emoji we force to
+ * colour).  A trailing VS15 (U+FE0E) overrides this and selects text
+ * presentation. */
+bool emoji_should_render_color(unsigned int uc);
 
 /* Render |text[0..len-1]| (UTF-16) as a color emoji onto |hdc|.
  * (x,y) = top-left of the render target; w×h = render target size

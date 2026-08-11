@@ -138,18 +138,34 @@ extern "C" void emoji_renderer_cleanup(void)
     g_fmtDip = 0.0f;
 }
 
-extern "C" bool emoji_is_color_candidate(unsigned int uc)
+/* Extra code points to force to colour beyond the broad ranges handled
+ * inline below.  The canonical list lives in
+ * unicode/force_color_emoji_chars.h; include it to keep a single
+ * source of truth, exactly like unicode/overflow_glyph_chars.h. */
+struct fc_interval { unsigned int first, last; };
+static const struct fc_interval force_color_extra[] = {
+    #include "unicode/force_color_emoji_chars.h"
+};
+
+extern "C" bool emoji_should_render_color(unsigned int uc)
 {
-    return
-        (uc >= 0x1F600 && uc <= 0x1F64F) ||   /* Emoticons           */
-        (uc >= 0x1F300 && uc <= 0x1F5FF) ||   /* Misc Symbols & Picto */
-        (uc >= 0x1F680 && uc <= 0x1F6FF) ||   /* Transport & Map      */
-        (uc >= 0x1F900 && uc <= 0x1F9FF) ||   /* Supplemental Symbols */
-        (uc >= 0x1FA00 && uc <= 0x1FAFF) ||   /* Extended-A           */
-        (uc >= 0x1F000 && uc <= 0x1F0FF) ||   /* Mahjong / Cards      */
-        (uc >= 0x1F1E6 && uc <= 0x1F1FF) ||   /* Regional Indicators  */
-        (uc >= 0x2600  && uc <= 0x26FF)  ||   /* Misc Symbols         */
-        (uc >= 0x2700  && uc <= 0x27BF);      /* Dingbats             */
+    if (uc >= 0x1F600 && uc <= 0x1F64F) return true;   /* Emoticons           */
+    if (uc >= 0x1F300 && uc <= 0x1F5FF) return true;   /* Misc Symbols & Pict */
+    if (uc >= 0x1F680 && uc <= 0x1F6FF) return true;   /* Transport & Map     */
+    if (uc >= 0x1F900 && uc <= 0x1F9FF) return true;   /* Supplemental Symbols */
+    if (uc >= 0x1FA00 && uc <= 0x1FAFF) return true;   /* Extended-A          */
+    if (uc >= 0x1F000 && uc <= 0x1F0FF) return true;   /* Mahjong / Cards     */
+    if (uc >= 0x1F1E6 && uc <= 0x1F1FF) return true;   /* Regional Indicators */
+    if (uc >= 0x2600  && uc <= 0x26FF)  return true;   /* Misc Symbols        */
+    if (uc >= 0x2700  && uc <= 0x27BF)  return true;   /* Dingbats            */
+    for (size_t i = 0;
+         i < sizeof(force_color_extra) / sizeof(force_color_extra[0]);
+         i++) {
+        if (uc >= force_color_extra[i].first &&
+            uc <= force_color_extra[i].last)
+            return true;
+    }
+    return false;
 }
 
 extern "C" bool emoji_render_color(

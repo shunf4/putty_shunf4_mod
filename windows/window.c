@@ -1807,21 +1807,6 @@ static void init_dpi_info(WinGuiSeat *wgs)
     }
 }
 
-static const WCHAR *const fallback_names[] = {
-    // L"Segoe UI Symbol",
-    // L"Cambria Math",
-    // L"Arial Unicode MS",
-    // L"DejaVu Sans",
-    L"Twitter Color Emoji",
-    L"Noto Color Emoji",
-
-    L"Dejavu Sans Mono",
-    L"Noto Sans Mono",
-    L"Segoe UI",
-    L"Segoe UI Symbol",
-    L"Lucida Sans Unicode",
-};
-
 /*
  * Initialise all the fonts we will need initially. There may be as many as
  * three or as few as one.  The other (potentially) twenty-one fonts are done
@@ -2136,11 +2121,10 @@ static void init_fonts(WinGuiSeat *wgs, int pick_width, int pick_height)
             else
                 break;
         }
-    }
-
-    emoji_renderer_init();
-    emoji_renderer_set_fonts(fallback_names,
+        emoji_renderer_init();
+        emoji_renderer_set_fonts(fallback_font_names,
                              wgs->fallback_font_count);
+    }
 }
 
 static void another_font(WinGuiSeat *wgs, int fontno)
@@ -4642,6 +4626,7 @@ static void do_text_internal(
                              + (wbuf[i+1] - 0xDC00) + 0x10000;
 
                     boolean special_emoji = false;
+                    bool vs15 = false;    /* U+FE0E text-presentation selector */
                     int special_emoji_clen_modifier_for_width = 0;
                     int special_emoji_clen_modifier_for_exttextout = 0;
 
@@ -4668,6 +4653,8 @@ static void do_text_internal(
                         int ni = i + clen;
                         if (ni < len &&
                             IS_LOW_VARSEL(wbuf[ni])) {
+                            if (wbuf[ni] == 0xFE0E)
+                                vs15 = true;   /* VS15 forces text style */
                             clen += 1;
                             special_emoji = true;
                             special_emoji_clen_modifier_for_exttextout += -1;
@@ -4706,7 +4693,7 @@ static void do_text_internal(
                      * (cw = 2 × font_width) it fills the whole area.
                      */
                     bool emoji_done = false;
-                    if (emoji_is_color_candidate(uc)) {
+                    if (!vs15 && emoji_should_render_color(uc)) {
                         int emoji_size = cw <= wgs->font_width
                             ? (cw * 6 + 2) / 5   /* half-width: 1.2× */
                             : cw;                  /* full-width: 1×   */
@@ -4715,6 +4702,21 @@ static void do_text_internal(
                                          wgs->offset_width;
                         int emoji_x = x_seg - (emoji_size - cw) / 2;
                         int emoji_w = emoji_size;
+
+                        /*
+                         * A half-width emoji whose cell was marked
+                         * ATTR_OVERFLOW_OK (the terminal decided the
+                         * cell to its right is blank) may spill into
+                         * that blank cell: grow the render box to two
+                         * cells so the colour glyph shows full-size
+                         * rather than squeezed.
+                         */
+                        if ((attr & ATTR_OVERFLOW_OK) &&
+                            cw <= wgs->font_width) {
+                            emoji_size = cw * 2;
+                            emoji_x = x_seg;
+                            emoji_w = cw * 2;
+                        }
 
                         /* Clamp to terminal window bounds */
                         if (emoji_x < 0) {
