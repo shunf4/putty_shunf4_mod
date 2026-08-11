@@ -2049,17 +2049,15 @@ static void init_fonts(WinGuiSeat *wgs, int pick_width, int pick_height)
     // L"Segoe UI Symbol",
     // L"Lucida Sans Unicode",
 
-            // L"Noto Color Emoji",
-            // L"Segoe UI Emoji",
-            // L"Twitter Color Emoji",
-
-
+            L"Noto Color Emoji",
+            L"Segoe UI Emoji",
+            L"Twitter Color Emoji",
 
             L"Dejavu Sans Mono",
+            L"Noto Sans Mono",  // NO GLYPH
             L"Lucida Sans Unicode",
             L"Segoe UI Symbol",
-            L"Noto Sans Mono",  // NO GLYPH
-            L"Segoe UI",
+            // L"Segoe UI",
 
             // L"Segoe UI Emoji",
             // L"Segoe UI Symbol",
