@@ -1453,19 +1453,30 @@ enum { GLYPH_HALF, GLYPH_FULL, GLYPH_XWIDE };
 
 /*
  * How to fit a half-width glyph (GLYPH_HALF) into a full-width target
- * region.  Two strategies, selected by this compile-time constant:
+ * region.  Two strategies:
  *
- *   OVERFLOW_CENTRE (default): render the glyph at its natural NORMAL
- *     nWidth and shift the draw origin right so it is horizontally
- *     centred within the two-cell region.  Visually consistent across
- *     fonts.
+ *   OVERFLOW_CENTRE: render the glyph at its natural NORMAL nWidth and
+ *     shift the draw origin right so it is horizontally centred within
+ *     the two-cell region.  Visually consistent across fonts.
  *
  *   OVERFLOW_WIDE: instead select the WIDE font variant (nWidth =
  *     2*font_width), letting GDI stretch the glyph to fill both cells.
- *     Faster but visually inconsistent across fonts.
+ *
+ * We use different strategies for the main font vs. fallback fonts:
+ *
+ * — Main font: OVERFLOW_CENTRE.  Characters that trigger overflow in
+ *   the main font (e.g. ←→↑↓ arrows) tend to have glyphs narrower
+ *   than two full cells; CENTRE aligns them naturally without
+ *   distorting the glyph.
+ *
+ * — Fallback font: OVERFLOW_WIDE.  Characters that reach the fallback
+ *   path are mostly monochrome emoji (e.g. U+26A0 WARNING) whose
+ *   glyphs are designed full-width; WIDE stretches them to fill the
+ *   two-cell span rather than leaving them small and off-centre.
  */
 enum { OVERFLOW_CENTRE, OVERFLOW_WIDE };
-static const int overflow_half_glyph_strategy = OVERFLOW_CENTRE;
+static const int overflow_main_font_half_glyph_strategy = OVERFLOW_CENTRE;
+static const int overflow_fallback_half_glyph_strategy = OVERFLOW_WIDE;
 
 static int glyph_width_class(int glyph_w, int font_width)
 {
@@ -1515,14 +1526,14 @@ static void overflow_glyph_render(
     /*
      * Overflow always draws into the full two-cell width.  The main-font
      * nWidth variant is chosen by the glyph's natural width class versus
-     * the (always full) target — same matrix as find_fallback_font_for:
+     * the (always full) target.  The half-glyph strategy is selected by
+     * overflow_main_font_half_glyph_strategy (default OVERFLOW_CENTRE:
+     * narrow glyphs such as arrows look better centred than stretched).
      *
-     *   GLYPH_HALF  -> NORMAL, centred by a rightward shift (OVERFLOW_CENTRE)
-     *               -> WIDE, stretched to fill both cells (OVERFLOW_WIDE)
+     *   GLYPH_HALF  -> NORMAL, centred by a rightward shift (CENTRE)
+     *               -> WIDE, stretched to fill both cells    (WIDE)
      *   GLYPH_FULL  -> NORMAL (already fills both cells)
      *   GLYPH_XWIDE -> NARROW (best available fit; NORMAL would overflow)
-     *
-     * The half-glyph strategy is selected by overflow_half_glyph_strategy.
      */
     nfont &= ~FONT_WIDE;
     nfont &= ~FONT_NARROW;
@@ -1541,7 +1552,7 @@ static void overflow_glyph_render(
         if (nf)
             use_font = nf;
     } else if (main_gclass == GLYPH_HALF &&
-               overflow_half_glyph_strategy == OVERFLOW_WIDE) {
+               overflow_main_font_half_glyph_strategy == OVERFLOW_WIDE) {
         another_font(wgs, nfont | FONT_WIDE);
         HFONT wf = wgs->fonts[nfont | FONT_WIDE];
         if (wf)
@@ -1550,12 +1561,12 @@ static void overflow_glyph_render(
     SelectObject(hdc, use_font);
 
     /*
-     * Centring offset for a half-width main-font glyph.  Only in the
-     * OVERFLOW_CENTRE strategy; the WIDE strategy stretches instead.
+     * Centring offset for a half-width main-font glyph.  Only active when
+     * overflow_main_font_half_glyph_strategy == OVERFLOW_CENTRE; the WIDE strategy stretches instead.
      * Full and xwide glyphs need no shift either way.
      */
     if (main_gclass == GLYPH_HALF &&
-        overflow_half_glyph_strategy == OVERFLOW_CENTRE && main_w > 0) {
+        overflow_main_font_half_glyph_strategy == OVERFLOW_CENTRE && main_w > 0) {
         int off = (target_w - main_w) / 2;
         if (off > 0)
             x_off = off;
