@@ -3511,8 +3511,8 @@ static void term_display_graphic_char(Terminal *term, unsigned long c)
              *
              * Instead the base stays half-width in the buffer (keeping
              * TUI column alignment intact) and VS16 is attached as a
-             * combining mark.  The front end renders the colour-emoji
-             * glyph overflowing into a blank right-hand cell when one is
+             * combining mark.  The front end renders the glyph
+             * overflowing into a blank right-hand cell when one is
              * available, and squeezed into the single cell otherwise —
              * purely a drawing concern, never a buffer-occupancy one.
              */
@@ -6404,7 +6404,8 @@ static void do_paint(Terminal *term)
                     /*
                      * Overflow not possible (non-blank neighbour or end
                      * of line): if the main font's own glyph is full-width,
-                     * squeeze it to the half-width cell (FONT_NARROW).  A
+                     * squeeze it to the half-width cell (ATTR_NARROW,
+                     * causing the front end to select FONT_NARROW).  A
                      * symbol the main font lacks is left as a plain NORMAL
                      * cell; the front end's missing-glyph fallback redraw
                      * draws it compressed instead.
@@ -6751,22 +6752,29 @@ void term_paint(Terminal *term,
  * this position is relative to the beginning of the scrollback, -1
  * to denote it is relative to the end, and 0 to denote that it is
  * relative to the current position.
- */
-/*
- * An overflowing glyph paints ink across two cells (its own cell and the
- * blank cell it borrows on the right), but that borrowed ink is not part
- * of the disptext dirty tracking: only the two cells' own contents are
- * compared against the new viewport content.  Scrolling shifts which
- * content occupies each viewport cell, so a cell whose new content
- * happens to match its stored state is skipped by do_paint even though
- * it physically still holds the old overflowing glyph's pixels — leaving
- * a ghost on otherwise-clean lines.
  *
- * The cheap, targeted fix is to invalidate exactly the cells that hold
- * overflow artifacts (either an overflowing glyph or a borrowed blank
- * cell) whenever the viewport scrolls.  That forces do_paint to redraw
- * precisely those cells (rare), clearing any stale ink, without a
- * full-screen repaint.
+ * Before scheduling the repaint, term_scroll() invalidates any cells
+ * carrying overflow artifacts so that do_paint redraws them — see
+ * term_invalidate_overflow_artifacts() below.
+ */
+
+/*
+ * Invalidate cells carrying overflow artifacts (ATTR_OVERFLOW_OK or
+ * ATTR_NO_BG) so that do_paint redraws them on the next repaint.
+ *
+ * An overflowing glyph paints ink across two cells (its own cell and
+ * the blank cell it borrows on the right), but that borrowed ink is
+ * not part of the disptext dirty tracking: only the two cells' own
+ * contents are compared against the new viewport content.  Scrolling
+ * shifts which content occupies each viewport cell, so a cell whose
+ * new content happens to match its stored state is skipped by
+ * do_paint even though it physically still holds the old overflowing
+ * glyph's pixels — leaving a ghost on otherwise-clean lines.
+ *
+ * The cheap, targeted fix is to invalidate exactly the cells that
+ * hold overflow artifacts whenever the viewport scrolls.  That forces
+ * do_paint to redraw precisely those cells (rare), clearing any stale
+ * ink, without a full-screen repaint.
  */
 static void term_invalidate_overflow_artifacts(Terminal *term)
 {
