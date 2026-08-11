@@ -48,7 +48,7 @@ struct termchar {
 };
 
 struct termline {
-    unsigned short lattr;
+    unsigned long long lattr;
     int cols;                          /* number of real columns on the line */
     int size;                          /* number of allocated termchars
                                         * (cc-lists may make this > cols) */
@@ -106,7 +106,7 @@ struct terminal_tag {
 #define TTYPE termchar
 #define TSIZE (sizeof(TTYPE))
 
-    int default_attr, curr_attr, save_attr;
+    signed long long default_attr, curr_attr, save_attr;
     truecolour curr_truecolour, save_truecolour;
     termchar basic_erase_char, erase_char;
 

@@ -250,6 +250,30 @@ static bool cell_is_blank_for_overflow(const termchar *c)
 }
 
 /*
+ * Does this cell carry a Variation Selector 16 (U+FE0F) combining
+ * mark?  VS16 requests emoji (full-width) presentation of the base
+ * character; we honour that as a drawing concern only — overflowing
+ * the half-width glyph into a blank right-hand cell — never as a
+ * buffer-width concern.  See the large comment in do_paint's overflow
+ * decision for why.
+ */
+static bool cell_has_vs16(const termchar *c)
+{
+    const termchar *dd = c;
+    while (dd->cc_next) {
+        dd += dd->cc_next;
+        unsigned long schar = dd->chr;
+        if ((schar & CSET_MASK) == CSET_ASCII ||
+            (schar & CSET_MASK) == CSET_LINEDRW ||
+            (schar & CSET_MASK) == CSET_SCOACS)
+            schar &= ~CSET_MASK;
+        if (schar == 0xFE0F)
+            return true;
+    }
+    return false;
+}
+
+/*
  * Add a combining character to a character cell.
  */
 static void add_cc(termline *line, int col, unsigned long chr)
@@ -3477,32 +3501,21 @@ static void term_display_graphic_char(Terminal *term, unsigned long c)
 
             /*
              * U+FE0F (Variation Selector 16) requests emoji
-             * presentation of the preceding character.  Per UAX #11
-             * an emoji-presentation sequence behaves as East Asian
-             * Wide, so we promote the preceding half-width base
-             * character to a full-width one (occupying two cells)
-             * before attaching the VS16 as a combining mark.
+             * presentation of the preceding character.  We deliberately
+             * do NOT promote the base to a full-width (two-cell)
+             * character here: occupying a second cell would put the base
+             * inside the terminal's wide-character overwrite logic, so a
+             * following space or printable character would erase the base
+             * (left half turned to space) — exactly the "emoji vanishes
+             * except at end of line" symptom.
              *
-             * Promotion is only done when it is safe: the base must
-             * currently be half-width, and the cell immediately to
-             * its right must be a blank erase cell (so we don't
-             * clobber a real character) that is not the last column
-             * of the line.  Otherwise VS16 is attached as an ordinary
-             * combining mark and the base stays half-width.
+             * Instead the base stays half-width in the buffer (keeping
+             * TUI column alignment intact) and VS16 is attached as a
+             * combining mark.  The front end renders the colour-emoji
+             * glyph overflowing into a blank right-hand cell when one is
+             * available, and squeezed into the single cell otherwise —
+             * purely a drawing concern, never a buffer-occupancy one.
              */
-            if (c == 0xFE0F &&
-                cline->chars[x].chr != UCSWIDE &&
-                x + 1 < linecols - 1 &&
-                term_char_width(term, cline->chars[x].chr) == 1 &&
-                (cline->chars[x + 1].chr == (CSET_ASCII | ' ') ||
-                 cline->chars[x + 1].chr == ' ')) {
-                clear_cc(cline, x + 1);
-                cline->chars[x + 1].chr = UCSWIDE;
-                cline->chars[x + 1].attr = cline->chars[x].attr;
-                cline->chars[x + 1].truecolour =
-                    cline->chars[x].truecolour;
-            }
-
             add_cc(cline, x, c);
             seen_disp_event(term);
         }
@@ -4324,7 +4337,7 @@ static void term_out(Terminal *term, bool called_from_term_data)
                   case ANSI('5', '#'):
                   case ANSI('6', '#'): {
                     compatibility(VT100);
-                    int nlattr;
+                    signed long long nlattr;
                     termline *ldata;
 
                     switch (ANSI(c, term->esc_query)) {
@@ -6107,7 +6120,7 @@ static void do_paint_draw(Terminal *term, termline *ldata, int x, int y,
 static void do_paint(Terminal *term)
 {
     int i, j, our_curs_y, our_curs_x;
-    int rv, cursor;
+    signed long long rv, cursor;
     pos scrpos;
     wchar_t *ch;
     size_t chlen;
@@ -6309,16 +6322,65 @@ static void do_paint(Terminal *term)
             /*
              * Glyph-overflow decision, always re-evaluated (it depends
              * on the right-hand neighbour, which may change
-             * independently of this cell).  Any overflow-capable
-             * half-width character (arrows, enclosed alphanumerics,
-             * default-text-style emoji such as U+26A0, ...) may spill
-             * its glyph into a blank right-hand cell; when that isn't
-             * possible, full-width-glyph characters are squeezed
+             * independently of this cell).
+             *
+             * A half-width cell may spill its glyph into a blank
+             * right-hand cell when EITHER:
+             *   - the base character is a known overflow glyph
+             *     (arrows, enclosed alphanumerics, U+26A0 WARNING,
+             *     ...), whose typographic glyph is wider than one cell
+             *     even with no variation selector; OR
+             *   - the cell carries a VS16 (U+FE0F) combining mark,
+             *     which requests emoji (full-width) presentation.
+             *
+             * ┌──────────────────────────────────────────────────────────┐
+             * │ Why VS16 emoji occupy half a cell but draw full-width    │
+             * ├──────────────────────────────────────────────────────────┤
+             * │                                                          │
+             * │ Terminal emulators split on how to render a VS16 emoji   │
+             * │ presentation sequence (e.g. ❤️, ⚠️, ☕️):               │
+             * │                                                          │
+             * │   • Windows Terminal: occupy TWO cells (full-width in    │
+             * │     the buffer too).  Cursor column accounting advances  │
+             * │     by 2, matching the glyph width.                     │
+             * │                                                          │
+             * │   • GNOME Terminal, xterm, wezterm, Alacritty: occupy    │
+             * │     ONE cell (half-width in the buffer), and draw the    │
+             * │     full-width glyph overflowing the cell.  Cursor       │
+             * │     accounting advances by 1.                            │
+             * │                                                          │
+             * │ We follow the GNOME Terminal / half-width-occupancy      │
+             * │ convention: the cell stays half-width in the buffer so   │
+             * │ that TUI applications (e.g. Claude Code) which count     │
+             * │ columns assuming width 1 are not broken, and the emoji   │
+             * │ glyph is drawn full-width by spilling into a blank       │
+             * │ right-hand cell when one is available, or squeezed into  │
+             * │ the single cell when not.  Overflow is purely a drawing  │
+             * │ concern — it never changes the buffer width or cursor    │
+             * │ column.                                                  │
+             * │                                                          │
+             * │ This is also why VS16 does NOT promote the base to a     │
+             * │ two-cell UCSWIDE character here (an earlier attempt did  │
+             * │ that and the terminal's wide-character overwrite logic   │
+             * │ then erased such emoji the moment a following space or   │
+             * │ printable character landed on their right half — they    │
+             * │ vanished everywhere except at end of line).              │
+             * │                                                          │
+             * │ SMP emoji that are already East Asian Wide (U+1F600      │
+             * │ etc.) keep their genuine two-cell width; the (tattr &    │
+             * │ ATTR_WIDE)==0 guard below excludes them, so a Wide      │
+             * │ emoji followed by VS16 is handled as the wide cell it    │
+             * │ already is and never mistakenly treated as half-width.   │
+             * └──────────────────────────────────────────────────────────┘
+             *
+             * When overflow isn't possible (non-blank neighbour or end
+             * of line), full-width-glyph characters are squeezed
              * (ATTR_NARROW) and naturally-half-width ones are left as
              * a plain single-cell render.
              */
             if ((tattr & ATTR_WIDE) == 0 &&
-                mk_is_overflow_glyph((unsigned int)tchar)) {
+                (mk_is_overflow_glyph((unsigned int)(tchar)) ||
+                 cell_has_vs16(d))) {
                 /*
                  * Overflow only into a genuine blank cell on the right.
                  * The end of the line is NOT a valid overflow target:
@@ -6329,9 +6391,24 @@ static void do_paint(Terminal *term)
                     (j + 1 < term->cols) &&
                     cell_is_blank_for_overflow(&d[1]);
                 if (can_overflow) {
+                    /*
+                     * Overflow into the blank cell on the right, exactly
+                     * like an arrow or enclosed-alphanumeric.  The front
+                     * end renders this with the WIDE font variant across
+                     * two half-width cells, and marks the borrowed cell
+                     * ATTR_NO_BG.
+                     */
                     tattr &= ~ATTR_NARROW;
                     tattr |= ATTR_OVERFLOW_OK;
                 } else if (font_says_wide) {
+                    /*
+                     * Overflow not possible (non-blank neighbour or end
+                     * of line): if the main font's own glyph is full-width,
+                     * squeeze it to the half-width cell (FONT_NARROW).  A
+                     * symbol the main font lacks is left as a plain NORMAL
+                     * cell; the front end's missing-glyph fallback redraw
+                     * draws it compressed instead.
+                     */
                     tattr |= ATTR_NARROW;
                 }
             }
@@ -6619,7 +6696,6 @@ static void do_paint(Terminal *term)
         }
         if (dirty_run && ccount > 0)
             do_paint_draw(term, ldata, start, i, ch, ccount, attr, tc);
-
         unlineptr(ldata);
     }
 
@@ -6676,6 +6752,33 @@ void term_paint(Terminal *term,
  * to denote it is relative to the end, and 0 to denote that it is
  * relative to the current position.
  */
+/*
+ * An overflowing glyph paints ink across two cells (its own cell and the
+ * blank cell it borrows on the right), but that borrowed ink is not part
+ * of the disptext dirty tracking: only the two cells' own contents are
+ * compared against the new viewport content.  Scrolling shifts which
+ * content occupies each viewport cell, so a cell whose new content
+ * happens to match its stored state is skipped by do_paint even though
+ * it physically still holds the old overflowing glyph's pixels — leaving
+ * a ghost on otherwise-clean lines.
+ *
+ * The cheap, targeted fix is to invalidate exactly the cells that hold
+ * overflow artifacts (either an overflowing glyph or a borrowed blank
+ * cell) whenever the viewport scrolls.  That forces do_paint to redraw
+ * precisely those cells (rare), clearing any stale ink, without a
+ * full-screen repaint.
+ */
+static void term_invalidate_overflow_artifacts(Terminal *term)
+{
+    for (int i = 0; i < term->rows; i++) {
+        for (int j = 0; j < term->cols; j++) {
+            if (term->disptext[i]->chars[j].attr &
+                (ATTR_OVERFLOW_OK | ATTR_NO_BG))
+                term->disptext[i]->chars[j].attr |= ATTR_INVALID;
+        }
+    }
+}
+
 void term_scroll(Terminal *term, int rel, int where)
 {
     int sbtop = -sblines(term);
@@ -6686,6 +6789,7 @@ void term_scroll(Terminal *term, int rel, int where)
     if (term->disptop > 0)
         term->disptop = 0;
     term->win_scrollbar_update_pending = true;
+    term_invalidate_overflow_artifacts(term);
     term_schedule_update(term);
 }
 

@@ -32,16 +32,17 @@
 /*
  * Default-text-presentation emoji that are half-width (East Asian
  * Width Neutral, so width 1) yet whose monochrome glyph is wider than
- * a single cell (e.g. WARNING SIGN U+26A0).  In a non-colour-emoji
- * build these are drawn with the main font and benefit from
- * overflowing into a blank right-hand cell.  Emoji that are already
- * East Asian Wide (e.g. U+26A1, U+2705) are NOT listed here because
- * they occupy two cells already and need no overflow.  In the
- * colour-emoji branch these are drawn by the DirectWrite colour path
- * instead, which has its own overflow handling.
+ * a single cell.  WARNING SIGN (U+26A0) is the canonical example and
+ * kept here as a bare-glyph overflow test case: in a non-colour-emoji
+ * build it is drawn with the main font and benefits from overflowing
+ * into a blank right-hand cell.  Emoji that are already East Asian
+ * Wide (e.g. U+26A1, U+2705) are NOT listed here because they occupy
+ * two cells already and need no overflow.
+ *
+ * Emoji that gain full-width presentation via VS16 (U+FE0F) are NOT
+ * listed here either: their overflow is granted by the "this cell
+ * carries a VS16 combining mark" rule in terminal.c's do_paint, not
+ * by this table.  In the colour-emoji branch all such glyphs are drawn
+ * by the DirectWrite colour path, which has its own overflow handling.
  */
-{0x2620, 0x2620},   /* ☠ SKULL AND CROSSBONES */
-{0x2626, 0x2626},   /* ☦ ORTHODOX CROSS */
 {0x26a0, 0x26a0},   /* ⚠ WARNING SIGN */
-{0x26cf, 0x26cf},   /* ⛏ PICK */
-{0x26d1, 0x26d1},   /* ⛑ HELMET WITH WHITE CROSS */

@@ -158,9 +158,9 @@ struct WinGuiSeatListNode wgslisthead = {
 
 static bool wintw_setup_draw_ctx(TermWin *);
 static void wintw_draw_text(TermWin *, int x, int y, wchar_t *text, int len,
-                            unsigned long long attrs, int lattrs, truecolour tc);
+                            unsigned long long attrs, signed long long lattrs, truecolour tc);
 static void wintw_draw_cursor(TermWin *, int x, int y, wchar_t *text, int len,
-                              unsigned long long attrs, int lattrs, truecolour tc);
+                              unsigned long long attrs, signed long long lattrs, truecolour tc);
 static void wintw_draw_trust_sigil(TermWin *, int x, int y);
 static int wintw_char_width(TermWin *, int uc);
 static void wintw_free_draw_ctx(TermWin *);
@@ -1436,28 +1436,140 @@ static bool text_has_glyph(HDC hdc, const WCHAR *str, int len)
     return idx != 0xFFFF && idx != 0;
 }
 
-static HFONT find_fallback_font(WinGuiSeat *wgs, HDC hdc,
-                                 const WCHAR *str, int len)
+/*
+ * Measure the advance width of the base character of |str| (the first
+ * code unit; trailing variation selectors are ignored as they carry no
+ * ink) in the currently-selected font, in logical units.  Uses
+ * GetCharWidth32W with a GetCharWidthW fallback, matching the rest of
+ * this file (win_char_width).  Returns 0 on failure.
+ */
+static int char_advance_width(HDC hdc, const WCHAR *str, int len)
 {
-    for (int i = 0; i < wgs->fallback_font_count; i++) {
-        SelectObject(hdc, wgs->fonts_fallback[i]);
-        if (text_has_glyph(hdc, str, len))
-            return wgs->fonts_fallback[i];
-    }
-    return NULL;
+    if (len <= 0)
+        return 0;
+    INT w = 0;
+    WCHAR c = str[0];
+    if (GetCharWidth32W(hdc, c, c, &w) == 1)
+        return w;
+    if (GetCharWidthW(hdc, c, c, &w) == 1)
+        return w;
+    return 0;
 }
 
-/* Same, but over the double-width fallback fonts (used when a glyph is
- * allowed to overflow a half-width cell). */
-static HFONT find_fallback_font_wide(WinGuiSeat *wgs, HDC hdc,
-                                     const WCHAR *str, int len)
+/*
+ * Glyph width class, measured against a single half-width cell
+ * (|font_width|):
+ *
+ *   GLYPH_HALF  — about one cell  (<= 1.2 cells)
+ *   GLYPH_FULL  — about two cells (1.2 .. 2.2 cells)
+ *   GLYPH_XWIDE — more than 2.2 cells (an over-wide symbol/emoji)
+ */
+enum { GLYPH_HALF, GLYPH_FULL, GLYPH_XWIDE };
+
+/*
+ * How to fit a half-width glyph (GLYPH_HALF) into a full-width target
+ * region.  Two strategies, selected by this compile-time constant:
+ *
+ *   OVERFLOW_CENTRE (default): render the glyph at its natural NORMAL
+ *     nWidth and shift the draw origin right so it is horizontally
+ *     centred within the two-cell region.  Visually consistent across
+ *     fonts.
+ *
+ *   OVERFLOW_WIDE: instead select the WIDE font variant (nWidth =
+ *     2*font_width), letting GDI stretch the glyph to fill both cells.
+ *     Faster but visually inconsistent across fonts.
+ */
+enum { OVERFLOW_CENTRE, OVERFLOW_WIDE };
+static const int overflow_half_glyph_strategy = OVERFLOW_CENTRE;
+
+static int glyph_width_class(int glyph_w, int font_width)
 {
+    if (glyph_w > font_width * 11 / 5)   /* > 2.2 cells */
+        return GLYPH_XWIDE;
+    if (glyph_w * 5 >= font_width * 6)   /* >= 1.2 cells */
+        return GLYPH_FULL;
+    return GLYPH_HALF;
+}
+
+/*
+ * Choose a fallback font for |str| and the horizontal offset needed to
+ * centre it within |target_width| pixels.  |target_width| is the width
+ * the glyph is expected to occupy: one half-width cell (font_width) or
+ * a full-width two-cell span.  The nWidth variant is picked from the
+ * glyph's natural design width class versus the target:
+ *
+ *   glyph \ target | half             | full
+ *   ----------------+------------------+-------------------
+ *   GLYPH_HALF      | NORMAL           | NORMAL + centre (OVERFLOW_CENTRE)
+ *   |               |                  | WIDE            (OVERFLOW_WIDE)
+ *   GLYPH_FULL      | NARROW           | NORMAL
+ *   GLYPH_XWIDE     | NARROW (no better)| NARROW (compress)
+ *
+ * A half-width glyph drawn full-width is, by default (OVERFLOW_CENTRE),
+ * rendered at natural NORMAL size and shifted right to centre it; with
+ * OVERFLOW_WIDE the WIDE variant stretches it instead.  An over-wide
+ * glyph can only be compressed via NARROW — there is no tighter variant,
+ * so GLYPH_XWIDE always maps to NARROW regardless of target.
+ *
+ * Returns the chosen font (NULL if no fallback face contains the glyph).
+ * On success, *x_offset_out receives the rightward pixel offset (only
+ * non-zero for the GLYPH_HALF + full-target centre case).
+ */
+static HFONT find_fallback_font_for(WinGuiSeat *wgs, HDC hdc,
+                                    const WCHAR *str, int len,
+                                    int font_width, int target_width,
+                                    int *x_offset_out)
+{
+    bool target_full = (target_width >= font_width * 3 / 2);
+    if (x_offset_out)
+        *x_offset_out = 0;
+
     for (int i = 0; i < wgs->fallback_font_count; i++) {
-        if (!wgs->fonts_fallback_wide[i])
-            continue;               /* wide variant failed to create */
-        SelectObject(hdc, wgs->fonts_fallback_wide[i]);
-        if (text_has_glyph(hdc, str, len))
-            return wgs->fonts_fallback_wide[i];
+        /* Presence and natural width are measured on the NORMAL variant
+         * (same face, so the glyph exists in all three nWidth variants). */
+        SelectObject(hdc, wgs->fonts_fallback[i]);
+        if (!text_has_glyph(hdc, str, len))
+            continue;
+
+        int glyph_w = char_advance_width(hdc, str, len);
+        if (glyph_w <= 0)
+            glyph_w = font_width;        /* sensible default if measure fails */
+        int gclass = glyph_width_class(glyph_w, font_width);
+
+        HFONT chosen;
+        bool centre = false;
+        switch (gclass) {
+          case GLYPH_HALF:
+            if (target_full &&
+                overflow_half_glyph_strategy == OVERFLOW_WIDE)
+                chosen = wgs->fonts_fallback_wide[i]; /* WIDE: stretch */
+            else {
+                chosen = wgs->fonts_fallback[i];        /* NORMAL */
+                centre = target_full;                   /* + centre */
+            }
+            break;
+          case GLYPH_FULL:
+            chosen = target_full ? wgs->fonts_fallback[i]         /* NORMAL */
+                                 : wgs->fonts_fallback_narrow[i]; /* NARROW */
+            break;
+          case GLYPH_XWIDE:
+          default:
+            /* No tighter variant than NARROW exists; compress for both
+             * targets (an xwide glyph in a full target still overflows
+             * NORMAL, so NARROW is the best available fit). */
+            chosen = wgs->fonts_fallback_narrow[i];
+            break;
+        }
+        if (!chosen)
+            continue;               /* requested variant failed to create */
+
+        if (centre && x_offset_out) {
+            int off = (target_width - glyph_w) / 2;
+            if (off < 0)
+                off = 0;
+            *x_offset_out = off;
+        }
+        return chosen;
     }
     return NULL;
 }
@@ -1483,23 +1595,80 @@ static void overflow_glyph_render(
     if (target_w <= cell_w)
         return;                            /* no room: fall back to squeeze */
 
+    /*
+     * Trim trailing zero-width variation selectors (VS1-16, and the
+     * VS17-256 surrogate pairs).  They carry no ink, and many fonts
+     * have no glyph for them (GetGlyphIndices reports 0xFFFF), which
+     * would make text_has_glyph() fail even when the base glyph — e.g.
+     * U+26A0 — is present, so the double-width fallback never gets
+     * picked and the overflow renders at half width.
+     */
+    int draw_len = len;
+    while (draw_len >= 2 &&
+           IS_HIGH_VARSEL(text[draw_len - 2], text[draw_len - 1]))
+        draw_len -= 2;
+    while (draw_len >= 1 && IS_LOW_VARSEL(text[draw_len - 1]))
+        draw_len--;
+
+    /*
+     * Overflow always draws into the full two-cell width.  The main-font
+     * nWidth variant is chosen by the glyph's natural width class versus
+     * the (always full) target — same matrix as find_fallback_font_for:
+     *
+     *   GLYPH_HALF  -> NORMAL, centred by a rightward shift (OVERFLOW_CENTRE)
+     *               -> WIDE, stretched to fill both cells (OVERFLOW_WIDE)
+     *   GLYPH_FULL  -> NORMAL (already fills both cells)
+     *   GLYPH_XWIDE -> NARROW (best available fit; NORMAL would overflow)
+     *
+     * The half-glyph strategy is selected by overflow_half_glyph_strategy.
+     */
+    nfont &= ~FONT_WIDE;
+    nfont &= ~FONT_NARROW;
     another_font(wgs, nfont);
     HFONT use_font = wgs->fonts[nfont];
     SelectObject(hdc, use_font);
-    if (!text_has_glyph(hdc, text, len) && wgs->fallback_font_count > 0) {
-        /*
-         * The main font lacks the glyph.  Prefer the double-width
-         * fallback font so the glyph is sized to fill the two cells we
-         * are about to paint; a single-width fallback glyph would stay
-         * small (e.g. U+26A0 WARNING).
-         */
-        HFONT fb = find_fallback_font_wide(wgs, hdc, text, len);
-        if (!fb)
-            fb = find_fallback_font(wgs, hdc, text, len);
-        if (fb)
+    int x_off = 0;
+    bool using_fallback = false;
+    int main_gclass = GLYPH_FULL;
+    int main_w = char_advance_width(hdc, text, draw_len);
+    if (main_w > 0)
+        main_gclass = glyph_width_class(main_w, wgs->font_width);
+
+    if (!text_has_glyph(hdc, text, draw_len) &&
+        wgs->fallback_font_count > 0) {
+        HFONT fb = find_fallback_font_for(wgs, hdc, text, draw_len,
+                                          wgs->font_width, target_w,
+                                          &x_off);
+        if (fb) {
             use_font = fb;
+            using_fallback = true;
+        }
+    } else if (main_gclass == GLYPH_XWIDE) {
+        another_font(wgs, nfont | FONT_NARROW);
+        HFONT nf = wgs->fonts[nfont | FONT_NARROW];
+        if (nf)
+            use_font = nf;
+    } else if (main_gclass == GLYPH_HALF &&
+               overflow_half_glyph_strategy == OVERFLOW_WIDE) {
+        another_font(wgs, nfont | FONT_WIDE);
+        HFONT wf = wgs->fonts[nfont | FONT_WIDE];
+        if (wf)
+            use_font = wf;
     }
     SelectObject(hdc, use_font);
+
+    /*
+     * Centring offset for a half-width main-font glyph (the fallback path
+     * already computed x_off above).  Only in the OVERFLOW_CENTRE strategy;
+     * the WIDE strategy stretches instead.  Full and xwide glyphs need no
+     * shift either way.
+     */
+    if (!using_fallback && main_gclass == GLYPH_HALF &&
+        overflow_half_glyph_strategy == OVERFLOW_CENTRE && main_w > 0) {
+        int off = (target_w - main_w) / 2;
+        if (off > 0)
+            x_off = off;
+    }
 
     RECT ext_box;
     ext_box.left = seg_x;
@@ -1511,8 +1680,8 @@ static void overflow_glyph_render(
     SetTextColor(hdc, fg);
     SetBkColor(hdc, bg);
     SetBkMode(hdc, OPAQUE);
-    ExtTextOutW(hdc, seg_x, y, ETO_CLIPPED | ETO_OPAQUE, &ext_box,
-                text, len, wide_dx);
+    ExtTextOutW(hdc, seg_x + x_off, y, ETO_CLIPPED | ETO_OPAQUE, &ext_box,
+                text, draw_len, wide_dx);
     SetBkMode(hdc, TRANSPARENT);
 }
 
@@ -1885,11 +2054,37 @@ static void init_fonts(WinGuiSeat *wgs, int pick_width, int pick_height)
             // L"Cambria Math",
             // L"Arial Unicode MS",
             // L"DejaVu Sans",
+
+    // L"Twitter Color Emoji",
+    // L"Noto Color Emoji",
+
+    // L"Dejavu Sans Mono",
+    // L"Noto Sans Mono",
+    // L"Segoe UI",
+    // L"Segoe UI Symbol",
+    // L"Lucida Sans Unicode",
+
+            // L"Noto Color Emoji",
             L"Segoe UI Emoji",
-            L"Segoe UI Symbol",
-            L"Dejavu Sans Mono",
-            L"Noto Sans Mono",
-            L"Lucida Sans Unicode",
+            L"Twitter Color Emoji",
+
+
+
+            // L"Dejavu Sans Mono",
+            // L"Lucida Sans Unicode",
+            // L"Dejavu Sans Mono",
+            // L"Segoe UI Symbol",
+            // L"Noto Sans Mono",  // NO GLYPH
+            // L"Segoe UI",
+
+            // L"Segoe UI Emoji",
+            // L"Segoe UI Symbol",
+            // L"Dejavu Sans Mono",
+            // L"Noto Sans Mono",
+            // L"Lucida Sans Unicode",
+
+            L"",  // Keep for empty
+
         };
         wgs->fallback_font_count = 0;
         /*
@@ -1902,6 +2097,9 @@ static void init_fonts(WinGuiSeat *wgs, int pick_width, int pick_height)
         if (n_fallback > FALLBACK_FONTS_MAX)
             n_fallback = FALLBACK_FONTS_MAX;
         for (int fi = 0; fi < n_fallback; fi++) {
+            if (fallback_font_names[fi][0] == L'\0') {
+                break;
+            }
             wgs->fonts_fallback[fi] = CreateFontW(
                 wgs->font_height, wgs->font_width, 0, 0, FW_DONTCARE,
                 false, false, false, DEFAULT_CHARSET,
@@ -1918,6 +2116,18 @@ static void init_fonts(WinGuiSeat *wgs, int pick_width, int pick_height)
             wgs->fonts_fallback_wide[fi] = CreateFontW(
                 wgs->font_height, wgs->font_width * 2, 0, 0, FW_DONTCARE,
                 false, false, false, DEFAULT_CHARSET,
+                OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+                FONT_QUALITY(quality),
+                FIXED_PITCH | FF_DONTCARE, fallback_font_names[fi]);
+            /*
+             * And a half-width variant, used to squeeze a full-width
+             * glyph (e.g. U+26A0 WARNING) into a single half-width cell
+             * when it cannot overflow.  Mirrors another_font's NARROW
+             * rounding (nWidth = (font_width+1)/2).
+             */
+            wgs->fonts_fallback_narrow[fi] = CreateFontW(
+                wgs->font_height, (wgs->font_width + 1) / 2, 0, 0,
+                FW_DONTCARE, false, false, false, DEFAULT_CHARSET,
                 OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
                 FONT_QUALITY(quality),
                 FIXED_PITCH | FF_DONTCARE, fallback_font_names[fi]);
@@ -2005,8 +2215,11 @@ static void deinit_fonts(WinGuiSeat *wgs)
             DeleteObject(wgs->fonts_fallback[i]);
         if (wgs->fonts_fallback_wide[i])
             DeleteObject(wgs->fonts_fallback_wide[i]);
+        if (wgs->fonts_fallback_narrow[i])
+            DeleteObject(wgs->fonts_fallback_narrow[i]);
         wgs->fonts_fallback[i] = NULL;
         wgs->fonts_fallback_wide[i] = NULL;
+        wgs->fonts_fallback_narrow[i] = NULL;
     }
     wgs->fallback_font_count = 0;
 
@@ -3996,7 +4209,7 @@ static void sys_cursor_update(WinGuiSeat *wgs)
 }
 
 static void draw_horizontal_line_on_text(
-    WinGuiSeat *wgs, int y, int lattr, RECT line_box, COLORREF colour)
+    WinGuiSeat *wgs, int y, signed long long lattr, RECT line_box, COLORREF colour)
 {
     if (lattr == LATTR_TOP || lattr == LATTR_BOT) {
         y *= 2;
@@ -4022,7 +4235,7 @@ static void draw_horizontal_line_on_text(
  */
 static void do_text_internal(
     WinGuiSeat *wgs, int x, int y, wchar_t *text, int len,
-    unsigned long long attr, int lattr, truecolour truecolour)
+    unsigned long long attr, signed long long lattr, truecolour truecolour)
 {
     COLORREF fg, bg, t;
     int nfg, nbg, nfont;
@@ -4546,25 +4759,52 @@ static void do_text_internal(
                             i += clen;
                             continue;
                         }
-                        HFONT fb = find_fallback_font(
-                            wgs, wgs->wintw_hdc, &wbuf[i], (clen + special_emoji_clen_modifier_for_exttextout));
+                        /* Compute position and cell width for this
+                         * glyph before the fallback lookup */
+                        int x_seg = x + xoffset;
+                        for (int k = 0; k < i; k++)
+                            x_seg += lpDx[k];
+                        int cw = 0;
+                        for (int k = 0; k < clen; k++)
+                            cw += lpDx[i + k];
+                        /*
+                         * Size the fallback glyph to the cell it occupies
+                         * (cw is the cell width): a wide cell is a
+                         * full-width target, a half-width cell is a
+                         * half-width target.  A half-width glyph drawn
+                         * into a full-width target is centred (x_off > 0)
+                         * rather than stretched.  Returns NULL if no
+                         * fallback face has the glyph.
+                         */
+                        int flen = (clen + special_emoji_clen_modifier_for_exttextout);
+                        int x_off = 0;
+                        HFONT fb = find_fallback_font_for(
+                            wgs, wgs->wintw_hdc, &wbuf[i], flen,
+                            wgs->font_width, cw, &x_off);
                         if (fb) {
+                            int glyph_y = y - wgs->font_height *
+                                (lattr == LATTR_BOT) + text_adjust;
+
                             RECT char_box;
                             char_box.left = x_seg;
                             char_box.top = line_box.top;
                             char_box.bottom = line_box.bottom;
-                            char_box.right = x_seg;
-                            for (int k = 0; k < (clen + special_emoji_clen_modifier_for_exttextout); k++)
-                                char_box.right += lpDx[i + k];
+                            /*
+                             * Clip box spans the cell the glyph occupies
+                             * (cw is the full cell width: one half-width
+                             * cell, or two for a wide cell), so the glyph
+                             * ink is not clipped at its right edge.  The
+                             * cell(s) to the right are repainted by their
+                             * own runs afterwards.
+                             */
+                            char_box.right = x_seg + cw;
                             SetBkColor(wgs->wintw_hdc, bg);
                             SetBkMode(wgs->wintw_hdc, OPAQUE);
                             SelectObject(wgs->wintw_hdc, fb);
                             ExtTextOutW(
-                                wgs->wintw_hdc, x_seg,
-                                y - wgs->font_height *
-                                    (lattr == LATTR_BOT) + text_adjust,
+                                wgs->wintw_hdc, x_seg + x_off, glyph_y,
                                 ETO_CLIPPED | ETO_OPAQUE, &char_box,
-                                &wbuf[i], (clen + special_emoji_clen_modifier_for_exttextout),
+                                &wbuf[i], flen,
                                 wgs->font_varpitch ? NULL : lpDx + i);
                             SetBkMode(wgs->wintw_hdc, TRANSPARENT);
                             SelectObject(wgs->wintw_hdc,
@@ -4605,7 +4845,7 @@ static void do_text_internal(
  */
 static void wintw_draw_text(
     TermWin *tw, int x, int y, wchar_t *text, int len,
-    unsigned long long attr, int lattr, truecolour truecolour)
+    unsigned long long attr, signed long long lattr, truecolour truecolour)
 {
     WinGuiSeat *wgs = container_of(tw, WinGuiSeat, termwin);
     if (attr & TATTR_COMBINING) {
@@ -4649,7 +4889,7 @@ static void wintw_draw_text(
 
 static void wintw_draw_cursor(
     TermWin *tw, int x, int y, wchar_t *text, int len,
-    unsigned long long attr, int lattr, truecolour truecolour)
+    unsigned long long attr, signed long long lattr, truecolour truecolour)
 {
     WinGuiSeat *wgs = container_of(tw, WinGuiSeat, termwin);
     int fnt_width;

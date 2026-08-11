@@ -100,7 +100,8 @@ struct WinGuiSeat {
     LOGFONT lfont;
     bool fontflag[FONT_MAXNO];
     HFONT fonts_fallback[FALLBACK_FONTS_MAX];
-    HFONT fonts_fallback_wide[FALLBACK_FONTS_MAX]; /* nWidth = 2*font_width */
+    HFONT fonts_fallback_wide[FALLBACK_FONTS_MAX];   /* nWidth = 2*font_width */
+    HFONT fonts_fallback_narrow[FALLBACK_FONTS_MAX]; /* nWidth = font_width/2 */
     int fallback_font_count;
     enum BoldMode bold_font_mode;
 

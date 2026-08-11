@@ -208,25 +208,25 @@ extern const int colour_indices_oscp_to_osc4[OSCP_NCOLOURS];
  * ATTR_INVALID is an illegal colour combination.
  */
 
-#define TATTR_COMBINING     0x80000000UL      /* combining characters */
+#define TATTR_COMBINING     (1ULL << 31)  /* combining characters */
 
-#define DATTR_STARTRUN      0x80000000UL   /* start of redraw run */
+#define DATTR_STARTRUN      (1ULL << 31)  /* start of redraw run */
 
-#define TDATTR_MASK         0x80000000UL
+#define TDATTR_MASK         (1ULL << 31)
 #define TATTR_MASK (TDATTR_MASK)
 #define DATTR_MASK (TDATTR_MASK)
 
-#define LATTR_NORM   0x00000000UL
-#define LATTR_WIDE   0x00000001UL
-#define LATTR_TOP    0x00000002UL
-#define LATTR_BOT    0x00000003UL
-#define LATTR_MODE   0x00000003UL
-#define LATTR_WRAPPED 0x00000010UL     /* this line wraps to next */
-#define LATTR_WRAPPED2 0x00000020UL    /* with WRAPPED: CJK wide character
+#define LATTR_NORM   0x00000000ULL
+#define LATTR_WIDE   0x00000001ULL
+#define LATTR_TOP    0x00000002ULL
+#define LATTR_BOT    0x00000003ULL
+#define LATTR_MODE   0x00000003ULL
+#define LATTR_WRAPPED 0x00000010ULL     /* this line wraps to next */
+#define LATTR_WRAPPED2 0x00000020ULL    /* with WRAPPED: CJK wide character
                                           wrapped to next line, so last
                                           single-width cell is empty */
 
-#define ATTR_INVALID 0x03FFFFU
+#define ATTR_INVALID 0x03FFFFULL
 
 /* Use the DC00 page for direct to font. */
 #define CSET_OEMCP   0x0000DC00UL      /* OEM Codepage DTF */
@@ -253,20 +253,20 @@ extern const int colour_indices_oscp_to_osc4[OSCP_NCOLOURS];
  */
 #define UCSWIDE      0xDFFF
 
-#define ATTR_NARROW  0x00800000U
-#define ATTR_WIDE    0x00400000U
-#define ATTR_BOLD    0x00040000U
-#define ATTR_UNDER   0x00080000U
-#define ATTR_REVERSE 0x00100000U
-#define ATTR_BLINK   0x00200000U
-#define ATTR_FGMASK  0x000001FFU /* stores a colour in OSC 4 indexing */
-#define ATTR_BGMASK  0x0003FE00U /* stores a colour in OSC 4 indexing */
-#define ATTR_COLOURS 0x0003FFFFU
-#define ATTR_DIM     0x01000000U
-#define ATTR_STRIKE  0x02000000U
-#define ATTR_ACTCURS 0x40000000UL      /* active cursor (block) */
-#define ATTR_PASCURS 0x20000000UL      /* passive cursor (box) */
-#define ATTR_RIGHTCURS 0x10000000UL    /* cursor-on-RHS */
+#define ATTR_NARROW  (1ULL << 23)
+#define ATTR_WIDE    (1ULL << 22)
+#define ATTR_BOLD    (1ULL << 18)
+#define ATTR_UNDER   (1ULL << 19)
+#define ATTR_REVERSE (1ULL << 20)
+#define ATTR_BLINK   (1ULL << 21)
+#define ATTR_FGMASK  0x000001FFULL /* stores a colour in OSC 4 indexing */
+#define ATTR_BGMASK  0x0003FE00ULL /* stores a colour in OSC 4 indexing */
+#define ATTR_COLOURS 0x0003FFFFULL
+#define ATTR_DIM     (1ULL << 24)
+#define ATTR_STRIKE  (1ULL << 25)
+#define ATTR_ACTCURS (1ULL << 30)      /* active cursor (block) */
+#define ATTR_PASCURS (1ULL << 29)      /* passive cursor (box) */
+#define ATTR_RIGHTCURS (1ULL << 28)    /* cursor-on-RHS */
 
 /*
  * Attribute words are unsigned 64-bit.  The low 32 bits hold the
