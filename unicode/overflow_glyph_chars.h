@@ -42,7 +42,7 @@
  * Emoji that gain full-width presentation via VS16 (U+FE0F) are NOT
  * listed here either: their overflow is granted by the "this cell
  * carries a VS16 combining mark" rule in terminal.c's do_paint, not
- * by this table.  In the colour-emoji branch all such glyphs are drawn
+ * by this table.  In colour-emoji builds all such glyphs are drawn
  * by the DirectWrite colour path, which has its own overflow handling.
  */
 {0x26a0, 0x26a0},   /* ⚠ WARNING SIGN */
