@@ -5,9 +5,8 @@
  * appear in a default text (monochrome) form.  E.g. U+3299 CIRCLED
  * IDEOGRAPH SECRET, used as an emoji in Japanese text.
  *
- * emoji_render.cpp inlines the same intervals so that the .cpp TU
- * needs no extra include path; keep this list and that inline table
- * in sync.
+ * emoji_render.cpp #includes this file so that the list lives in a
+ * single place; no separate table to keep in sync.
  *
  * "Colour" is independent of width: whether a character occupies one
  * or two cells is decided elsewhere (wcwidth / overflow), and this
