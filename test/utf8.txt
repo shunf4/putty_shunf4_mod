@@ -20,11 +20,65 @@ Arabic and bidirectional text:
           وسلم: بني الاسلام على خمس شهادة ان لا اله الا الله واقام              
 Mixed LTR and RTL text: [44mجرير[m [41mرضي[m back to LTR.
 
-East Asian Ambiguous characters: ¼½¾¼½¾¼½¾¼½¾¼½¾¼½¾¼½¾¼½¾¼½¾¼½¾
+East Asian Ambiguous characters (half-width by default): ¼½¾¼½¾¼½¾¼½¾¼½¾¼½¾¼½¾¼½¾¼½¾¼½¾
 
-Emoji via U+FE0F: ❤️ ☺️ ☹️         (narrow, because wcwidth mishandles these)
-Dedicated emoji:  💜 🙂 🙁      (wide and should look correct)
+
+Overflowable symbols (half-width cell, glyph may spill into a blank
+cell on the right).  These are half-width in the buffer so TUI
+applications that assume width 1 don't misalign, but the full glyph is
+drawn when the next cell is blank:
+
+  Arrows:            ← → ↑ ↓ ↔ ↕ ↖ ↗ ↘ ↙
+  Arrows + blank:    ← → ↑ ↓ ↔ ↕
+  Roman numerals:    Ⅰ Ⅱ Ⅲ Ⅳ Ⅴ Ⅵ Ⅶ Ⅷ Ⅸ Ⅹ Ⅺ Ⅻ   ⅰ ⅱ ⅲ ⅳ ⅴ ⅵ ⅶ ⅷ ⅸ
+  Enclosed digits:   ① ② ③ ④ ⑤ ⑥ ⑦ ⑧ ⑨ ⑩ ⑪ ⑫ ⑬ ⑭ ⑮ ⑯ ⑰ ⑱ ⑲ ⑳
+
+  When the next cell is a real character (not blank), these should be
+  SQUEEZED into the half-width cell instead of overflowing:
+  ←X →X ①X ⑤X
+
+
+Half-width default-text symbols whose glyph is wider than one cell.
+U+26A0 (WARNING SIGN) is the canonical case kept in the overflow table;
+rendered in colour in the emoji build, and overflowed when the right
+cell is blank:
+  Warning:   ⚠
+  With blank: ⚠ ⚠ ⚠
+  Squeezed against a character: ⚠X ⚠X ⚠X
+
+  With VS15 (U+FE0E, force text style, monochrome; overflow follows the
+  bare symbol — U+26A0 still overflows into a blank right cell):
+  ⚠︎   ⚠︎X
+
+  With VS16 (U+FE0F, force emoji presentation, colour):
+  ⚠️
+
+
+Emoji via U+FE0F (a half-width text-default symbol + VS16 -> colour
+emoji presentation).  These OCCUPY ONE cell in the buffer (half-width,
+so TUI apps that count columns aren't broken) and DRAW the full-width
+colour glyph overflowing into a blank right cell when one is available
+(GNOME Terminal / xterm / wezterm / Alacritty style; NOT Windows
+Terminal, which occupies two cells).  When the right neighbour is not
+blank the glyph is squeezed into its single cell.  VS16 never changes
+the buffer width — overflow is purely a drawing concern:
+  ❤️ ☺️ ☹️        (right cell blank -> overflow, draw 2 cells)
+  ❤️X ☺️X ☹️X      (right cell solid -> squeeze into 1 cell)
+
+Dedicated emoji (already East Asian Wide: occupy 2 cells, draw 2 cells).
+U+2615 HOT BEVERAGE belongs here (it is Wide), not with the half-width
+VS16 group above:
+  💜 🙂 🙁 👋 👍 😀 ☕
+
+A Wide emoji followed by VS16 stays Wide (2 cells) — VS16 must NOT
+collapse a Wide emoji to half-width:
+  😀️ 🙂️ ☕️
+
+Emoji forced to colour from a text default (U+3299 ㊙ is outside the
+broad emoji blocks and is added via the force-colour table):
+  ㊙ ㊙ ㊙
+
 Combined via ZWJ: 👩‍💻          (PuTTY doesn't understand ZWJ)
 Skin tone mod:    👩🏻 👩🏿     (wcwidth doesn't know those are modifiers)
-Flags:            🇬🇧 🇺🇦 🇪🇺      (should work in GTK 2 or better)
+Flags:            🇬🇧 🇺🇦 🇪🇺      (regional indicator pairs ligate into flags)
 Flags using tags: 🏴󠁧󠁢󠁥󠁮󠁧󠁿 🏴󠁧󠁢󠁳󠁣󠁴󠁿 🏴󠁧󠁢󠁷󠁬󠁳󠁿      (the tags are treated as combining marks)

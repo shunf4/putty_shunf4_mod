@@ -157,9 +157,9 @@ struct WinGuiSeatListNode wgslisthead = {
 
 static bool wintw_setup_draw_ctx(TermWin *);
 static void wintw_draw_text(TermWin *, int x, int y, wchar_t *text, int len,
-                            unsigned long long attrs, int lattrs, truecolour tc);
+                            unsigned long long attrs, signed long long lattrs, truecolour tc);
 static void wintw_draw_cursor(TermWin *, int x, int y, wchar_t *text, int len,
-                              unsigned long long attrs, int lattrs, truecolour tc);
+                              unsigned long long attrs, signed long long lattrs, truecolour tc);
 static void wintw_draw_trust_sigil(TermWin *, int x, int y);
 static int wintw_char_width(TermWin *, int uc);
 static void wintw_free_draw_ctx(TermWin *);
@@ -1421,7 +1421,60 @@ static void exact_textout(HDC hdc, int x, int y, CONST RECT *lprc,
 }
 
 
+/*
+ * Measure the advance width of the base character of |str| (the first
+ * code unit; trailing variation selectors are ignored as they carry no
+ * ink) in the currently-selected font, in logical units.  Uses
+ * GetCharWidth32W with a GetCharWidthW fallback, matching the rest of
+ * this file (win_char_width).  Returns 0 on failure.
+ */
+static int char_advance_width(HDC hdc, const WCHAR *str, int len)
+{
+    if (len <= 0)
+        return 0;
+    INT w = 0;
+    WCHAR c = str[0];
+    if (GetCharWidth32W(hdc, c, c, &w) == 1)
+        return w;
+    if (GetCharWidthW(hdc, c, c, &w) == 1)
+        return w;
+    return 0;
+}
 
+/*
+ * Glyph width class, measured against a single half-width cell
+ * (|font_width|):
+ *
+ *   GLYPH_HALF  — about one cell  (<= 1.2 cells)
+ *   GLYPH_FULL  — about two cells (1.2 .. 2.2 cells)
+ *   GLYPH_XWIDE — more than 2.2 cells (an over-wide symbol/emoji)
+ */
+enum { GLYPH_HALF, GLYPH_FULL, GLYPH_XWIDE };
+
+/*
+ * How to fit a half-width glyph (GLYPH_HALF) into a full-width target
+ * region.  Two strategies, selected by this compile-time constant:
+ *
+ *   OVERFLOW_CENTRE (default): render the glyph at its natural NORMAL
+ *     nWidth and shift the draw origin right so it is horizontally
+ *     centred within the two-cell region.  Visually consistent across
+ *     fonts.
+ *
+ *   OVERFLOW_WIDE: instead select the WIDE font variant (nWidth =
+ *     2*font_width), letting GDI stretch the glyph to fill both cells.
+ *     Faster but visually inconsistent across fonts.
+ */
+enum { OVERFLOW_CENTRE, OVERFLOW_WIDE };
+static const int overflow_half_glyph_strategy = OVERFLOW_CENTRE;
+
+static int glyph_width_class(int glyph_w, int font_width)
+{
+    if (glyph_w > font_width * 11 / 5)   /* > 2.2 cells */
+        return GLYPH_XWIDE;
+    if (glyph_w * 5 >= font_width * 6)   /* >= 1.2 cells */
+        return GLYPH_FULL;
+    return GLYPH_HALF;
+}
 
 /*
  * Draw a half-width character's glyph overflowing into the blank cell
@@ -1444,10 +1497,69 @@ static void overflow_glyph_render(
     if (target_w <= cell_w)
         return;                            /* no room: fall back to squeeze */
 
+    /*
+     * Trim trailing zero-width variation selectors (VS1-16, and the
+     * VS17-256 surrogate pairs).  They carry no ink, and many fonts
+     * have no glyph for them (GetGlyphIndices reports 0xFFFF), which
+     * would make text_has_glyph() fail even when the base glyph — e.g.
+     * U+26A0 — is present, so the double-width fallback never gets
+     * picked and the overflow renders at half width.
+     */
+    int draw_len = len;
+    while (draw_len >= 2 &&
+           IS_HIGH_VARSEL(text[draw_len - 2], text[draw_len - 1]))
+        draw_len -= 2;
+    while (draw_len >= 1 && IS_LOW_VARSEL(text[draw_len - 1]))
+        draw_len--;
+
+    /*
+     * Overflow always draws into the full two-cell width.  The main-font
+     * nWidth variant is chosen by the glyph's natural width class versus
+     * the (always full) target — same matrix as find_fallback_font_for:
+     *
+     *   GLYPH_HALF  -> NORMAL, centred by a rightward shift (OVERFLOW_CENTRE)
+     *               -> WIDE, stretched to fill both cells (OVERFLOW_WIDE)
+     *   GLYPH_FULL  -> NORMAL (already fills both cells)
+     *   GLYPH_XWIDE -> NARROW (best available fit; NORMAL would overflow)
+     *
+     * The half-glyph strategy is selected by overflow_half_glyph_strategy.
+     */
+    nfont &= ~FONT_WIDE;
+    nfont &= ~FONT_NARROW;
     another_font(wgs, nfont);
     HFONT use_font = wgs->fonts[nfont];
     SelectObject(hdc, use_font);
+    int x_off = 0;
+    int main_gclass = GLYPH_FULL;
+    int main_w = char_advance_width(hdc, text, draw_len);
+    if (main_w > 0)
+        main_gclass = glyph_width_class(main_w, wgs->font_width);
+
+    if (main_gclass == GLYPH_XWIDE) {
+        another_font(wgs, nfont | FONT_NARROW);
+        HFONT nf = wgs->fonts[nfont | FONT_NARROW];
+        if (nf)
+            use_font = nf;
+    } else if (main_gclass == GLYPH_HALF &&
+               overflow_half_glyph_strategy == OVERFLOW_WIDE) {
+        another_font(wgs, nfont | FONT_WIDE);
+        HFONT wf = wgs->fonts[nfont | FONT_WIDE];
+        if (wf)
+            use_font = wf;
+    }
     SelectObject(hdc, use_font);
+
+    /*
+     * Centring offset for a half-width main-font glyph.  Only in the
+     * OVERFLOW_CENTRE strategy; the WIDE strategy stretches instead.
+     * Full and xwide glyphs need no shift either way.
+     */
+    if (main_gclass == GLYPH_HALF &&
+        overflow_half_glyph_strategy == OVERFLOW_CENTRE && main_w > 0) {
+        int off = (target_w - main_w) / 2;
+        if (off > 0)
+            x_off = off;
+    }
 
     RECT ext_box;
     ext_box.left = seg_x;
@@ -1459,8 +1571,8 @@ static void overflow_glyph_render(
     SetTextColor(hdc, fg);
     SetBkColor(hdc, bg);
     SetBkMode(hdc, OPAQUE);
-    ExtTextOutW(hdc, seg_x, y, ETO_CLIPPED | ETO_OPAQUE, &ext_box,
-                text, len, wide_dx);
+    ExtTextOutW(hdc, seg_x + x_off, y, ETO_CLIPPED | ETO_OPAQUE, &ext_box,
+                text, draw_len, wide_dx);
     SetBkMode(hdc, TRANSPARENT);
 }
 
@@ -1875,6 +1987,7 @@ static void deinit_fonts(WinGuiSeat *wgs)
         wgs->fonts[i] = 0;
         wgs->fontflag[i] = false;
     }
+
 
     if (trust_icon != INVALID_HANDLE_VALUE) {
         DestroyIcon(trust_icon);
@@ -3862,7 +3975,7 @@ static void sys_cursor_update(WinGuiSeat *wgs)
 }
 
 static void draw_horizontal_line_on_text(
-    WinGuiSeat *wgs, int y, int lattr, RECT line_box, COLORREF colour)
+    WinGuiSeat *wgs, int y, signed long long lattr, RECT line_box, COLORREF colour)
 {
     if (lattr == LATTR_TOP || lattr == LATTR_BOT) {
         y *= 2;
@@ -3888,7 +4001,7 @@ static void draw_horizontal_line_on_text(
  */
 static void do_text_internal(
     WinGuiSeat *wgs, int x, int y, wchar_t *text, int len,
-    unsigned long long attr, int lattr, truecolour truecolour)
+    unsigned long long attr, signed long long lattr, truecolour truecolour)
 {
     COLORREF fg, bg, t;
     int nfg, nbg, nfont;
@@ -4250,6 +4363,23 @@ static void do_text_internal(
                     ETO_CLIPPED, &line_box, wbuf, len,
                     (use_lpDx ? lpDx : NULL));
             }
+
+            /*
+             * Glyph overflow: a half-width cell whose glyph is
+             * full-width may spill into the blank cell on its right.
+             * The batch render above drew it squeezed into the single
+             * cell; here we redraw it overflowing across both cells
+             * so the full glyph is visible.
+             */
+            if (attr & ATTR_OVERFLOW_OK) {
+                int seg_x = x + xoffset;
+                overflow_glyph_render(
+                    wgs, wgs->wintw_hdc,
+                    y - wgs->font_height *
+                        (lattr == LATTR_BOT) + text_adjust,
+                    seg_x, char_width, &line_box, wbuf, len,
+                    nfont, fg, bg);
+            }
         }
 
         /*
@@ -4280,7 +4410,7 @@ static void do_text_internal(
  */
 static void wintw_draw_text(
     TermWin *tw, int x, int y, wchar_t *text, int len,
-    unsigned long long attr, int lattr, truecolour truecolour)
+    unsigned long long attr, signed long long lattr, truecolour truecolour)
 {
     WinGuiSeat *wgs = container_of(tw, WinGuiSeat, termwin);
     if (attr & TATTR_COMBINING) {
@@ -4324,7 +4454,7 @@ static void wintw_draw_text(
 
 static void wintw_draw_cursor(
     TermWin *tw, int x, int y, wchar_t *text, int len,
-    unsigned long long attr, int lattr, truecolour truecolour)
+    unsigned long long attr, signed long long lattr, truecolour truecolour)
 {
     WinGuiSeat *wgs = container_of(tw, WinGuiSeat, termwin);
     int fnt_width;
