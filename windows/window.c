@@ -4742,6 +4742,35 @@ static void do_text_internal(
                             emoji_w = cw;
                         }
 
+                        /*
+                         * Overwrite the monochrome glyph that the
+                         * main-font pass painted into this cell.  We
+                         * draw a space — SetBkMode(OPAQUE) fills the
+                         * cell background, and a space carries no ink
+                         * — so the cell is clean before DirectWrite
+                         * overdraws the colour emoji.  Only the cell
+                         * itself is touched; adjacent cells are not
+                         * affected.
+                         */
+                        {
+                            int glyph_y = y - wgs->font_height *
+                                (lattr == LATTR_BOT) + text_adjust;
+                            RECT cell_rect;
+                            cell_rect.left = x_seg;
+                            cell_rect.top = glyph_y;
+                            cell_rect.right = x_seg + cw;
+                            cell_rect.bottom = glyph_y + ch;
+                            COLORREF save_bk = SetBkColor(
+                                wgs->wintw_hdc, bg);
+                            int save_bkmode = SetBkMode(
+                                wgs->wintw_hdc, OPAQUE);
+                            ExtTextOutW(wgs->wintw_hdc, x_seg, glyph_y,
+                                        ETO_CLIPPED | ETO_OPAQUE,
+                                        &cell_rect, L" ", 1, NULL);
+                            SetBkMode(wgs->wintw_hdc, save_bkmode);
+                            SetBkColor(wgs->wintw_hdc, save_bk);
+                        }
+
                         emoji_done = emoji_render_color(
                             wgs->wintw_hdc, emoji_x,
                             y - wgs->font_height *
