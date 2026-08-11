@@ -4714,6 +4714,7 @@ static void do_text_internal(
                                          wgs->offset_width;
                         int emoji_x = x_seg - (emoji_size - cw) / 2;
                         int emoji_w = emoji_size;
+                        int emoji_base_w = cw;
 
                         /*
                          * A half-width emoji whose cell was marked
@@ -4728,6 +4729,7 @@ static void do_text_internal(
                             emoji_size = cw * 2;
                             emoji_x = x_seg;
                             emoji_w = cw * 2;
+                            emoji_base_w = cw * 2;
                         }
 
                         /* Clamp to terminal window bounds */
@@ -4758,7 +4760,7 @@ static void do_text_internal(
                             RECT cell_rect;
                             cell_rect.left = x_seg;
                             cell_rect.top = glyph_y;
-                            cell_rect.right = x_seg + cw;
+                            cell_rect.right = x_seg + emoji_base_w;
                             cell_rect.bottom = glyph_y + ch;
                             COLORREF save_bk = SetBkColor(
                                 wgs->wintw_hdc, bg);
