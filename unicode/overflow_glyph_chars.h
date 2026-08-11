@@ -46,3 +46,13 @@
  * by the DirectWrite colour path, which has its own overflow handling.
  */
 {0x26a0, 0x26a0},   /* ⚠ WARNING SIGN */
+{0x2713, 0x2713},   /* checkmark */
+{0x2611, 0x2611},   /* ballot check */
+
+
+{0x2718, 0x2718},   /* crosses */
+{0x2716, 0x2716},
+{0x2613, 0x2613},
+{0x2717, 0x2717},
+{0x2612, 0x2612},
+
