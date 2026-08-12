@@ -1,0 +1,166 @@
+name: Build pterm (MSVC, Release)
+
+# Builds pterm.exe for three branches (main, nofontfallback, emoji) using
+# CMake + the MSVC toolchain in Release / x64, renames each produced binary
+# (pterm_noemoji / pterm_nofontfallback / pterm + pterm_emoji), bundles them
+# together with the shared conpty.dll and OpenConsole.exe runtime assets into
+# a single flat zip named with the short SHA and a timestamp, then uploads it
+# both as a workflow artifact and as a GitHub Release asset.
+#
+# Triggered on every push to any of the three branches.
+
+on:
+  push:
+    branches: [main, nofontfallback, emoji]
+  workflow_dispatch:
+
+permissions:
+  contents: write   # needed by softprops/action-gh-release to create the release
+
+env:
+  BUILD_TYPE: Release
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout (trigger branch)
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          # We need to switch between branches at runtime, so fetch all of
+          # them (shallow is fine) rather than just the triggering branch.
+          fetch-depth: 0
+
+      # ---------------------------------------------------------------------
+      # Build + collect step, repeated for each branch.
+      #
+      # For every branch we: switch the working tree to that branch, configure
+      # a FRESH build directory (so generated headers like commit id / licence
+      # and all object files reflect this branch only, with no cross-branch
+      # contamination), build just the pterm target in Release, and copy the
+      # produced pterm.exe into a staging dir under the desired name.
+      #
+      # VS is a multi-config generator (config passed at build time, not
+      # configure time); MSVC is the default compiler on windows-latest; -A x64
+      # forces the 64-bit platform.
+      # ---------------------------------------------------------------------
+      - name: Set up staging directory
+        run: mkdir -p staging
+        shell: bash
+
+      - name: Build main -> pterm_noemoji.exe
+        run: |
+          git checkout -f main
+          git reset --hard origin/main
+          cmake -S . -B build-main -A x64
+          cmake --build build-main --config ${{ env.BUILD_TYPE }} --target pterm
+          cp "build-main/${BUILD_TYPE}/pterm.exe" "staging/pterm_noemoji.exe"
+        shell: bash
+
+      - name: Build nofontfallback -> pterm_nofontfallback.exe
+        run: |
+          git checkout -f nofontfallback
+          git reset --hard origin/nofontfallback
+          cmake -S . -B build-nofontfallback -A x64
+          cmake --build build-nofontfallback --config ${{ env.BUILD_TYPE }} --target pterm
+          cp "build-nofontfallback/${BUILD_TYPE}/pterm.exe" "staging/pterm_nofontfallback.exe"
+        shell: bash
+
+      - name: Build emoji -> pterm.exe + pterm_emoji.exe
+        run: |
+          git checkout -f emoji
+          git reset --hard origin/emoji
+          cmake -S . -B build-emoji -A x64
+          cmake --build build-emoji --config ${{ env.BUILD_TYPE }} --target pterm
+          cp "build-emoji/${BUILD_TYPE}/pterm.exe" "staging/pterm.exe"
+          cp "build-emoji/${BUILD_TYPE}/pterm.exe" "staging/pterm_emoji.exe"
+        shell: bash
+
+      - name: Add shared ConPTY runtime assets
+        run: |
+          cp terminal/asset/conpty.dll staging/conpty.dll
+          cp terminal/asset/OpenConsole.exe staging/OpenConsole.exe
+          ls -la staging
+        shell: bash
+
+      # ---------------------------------------------------------------------
+      # Build a name and a flat zip.
+      #
+      # We compute a short SHA and a UTC timestamp, and use them both in the
+      # zip name and (later) the release tag so every commit produces a
+      # distinct, traceable artifact. We pin the triggering branch + SHA so
+      # the name records which branch was pushed even though the job builds
+      # all three.
+      # ---------------------------------------------------------------------
+      - name: Compute zip name (commit + timestamp)
+        id: zipname
+        run: |
+          SHORT_SHA=${GITHUB_SHA::7}
+          # UTC timestamp YYYYmmdd-HHMMSS
+          STAMP=$(date -u +"%Y%m%d-%H%M%S")
+          BRANCH="${GITHUB_REF_NAME}"
+          ZIP_NAME="pterm_shunf4-${BRANCH}-${SHORT_SHA}-${STAMP}.zip"
+          echo "zip_name=${ZIP_NAME}" >> "$GITHUB_OUTPUT"
+          echo "short_sha=${SHORT_SHA}" >> "$GITHUB_OUTPUT"
+          echo "stamp=${STAMP}" >> "$GITHUB_OUTPUT"
+          echo "branch=${BRANCH}" >> "$GITHUB_OUTPUT"
+          echo "Computed zip name: ${ZIP_NAME}"
+        shell: bash
+
+      - name: Verify staging contents then create flat zip
+        # Fail loudly if any of the six expected files is missing, so we never
+        # silently ship a partial bundle. Then zip staging\* flatly (no leading
+        # directory) with -Force to overwrite any pre-existing file.
+        run: |
+          $expected = @(
+            'pterm_noemoji.exe','pterm_nofontfallback.exe',
+            'pterm.exe','pterm_emoji.exe',
+            'conpty.dll','OpenConsole.exe'
+          )
+          $missing = $expected | Where-Object { -not (Test-Path "staging\$_") }
+          if ($missing) {
+            throw "Missing staged files: $($missing -join ', ')"
+          }
+          Compress-Archive -Path staging\* `
+            -DestinationPath "${{ steps.zipname.outputs.zip_name }}" -Force
+          Get-Item "${{ steps.zipname.outputs.zip_name }}" | Select-Object Name, Length
+        shell: pwsh
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        with:
+          name: ${{ steps.zipname.outputs.zip_name }}
+          # upload-artifact wraps this in another zip; since we are already
+          # passing a zip, disable compression to avoid a double-zip penalty.
+          compression-level: 0
+          path: ${{ steps.zipname.outputs.zip_name }}
+
+      # ---------------------------------------------------------------------
+      # Publish a GitHub Release. Every push gets its own prerelease tagged
+      # with branch + short SHA + timestamp, carrying the zip as its asset.
+      # ---------------------------------------------------------------------
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@c95fe0f26b377c9e612154ed1365397d116a082b # v2.2.1
+        with:
+          tag_name: pterm-build-${{ steps.zipname.outputs.branch }}-${{ steps.zipname.outputs.short_sha }}-${{ steps.zipname.outputs.stamp }}
+          name: pterm ${{ steps.zipname.outputs.branch }} ${{ steps.zipname.outputs.short_sha }} (${{ steps.zipname.outputs.stamp }})
+          body: |
+            Automated build of pterm (MSVC x64, Release).
+
+            - Trigger branch: `${{ steps.zipname.outputs.branch }}`
+            - Commit: `${{ steps.zipname.outputs.short_sha }}`
+            - Built (UTC): `${{ steps.zipname.outputs.stamp }}`
+
+            Bundle contains four binaries, each built from the corresponding branch:
+              - `pterm_noemoji.exe`        (main)
+              - `pterm_nofontfallback.exe` (nofontfallback)
+              - `pterm.exe`                (emoji)
+              - `pterm_emoji.exe`          (emoji, duplicate)
+
+            Plus the shared ConPTY runtime (`conpty.dll`, `OpenConsole.exe`).
+            Unzip into one folder and run.
+          prerelease: true
+          files: ${{ steps.zipname.outputs.zip_name }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
