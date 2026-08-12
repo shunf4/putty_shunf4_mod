@@ -45,6 +45,8 @@
  * by this table.  In colour-emoji builds all such glyphs are drawn
  * by the DirectWrite colour path, which has its own overflow handling.
  */
+{0x25cf, 0x25cf},   /* black circle */
+{0x25ef, 0x25ef},   /* circle */
 {0x2611, 0x2611},   /* ballot check */
 {0x2612, 0x2612},
 {0x2613, 0x2613},
