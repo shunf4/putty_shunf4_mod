@@ -160,7 +160,7 @@ jobs:
 
             Plus the shared ConPTY runtime (`conpty.dll`, `OpenConsole.exe`).
             Unzip into one folder and run.
-          prerelease: true
+          prerelease: false
           files: ${{ steps.zipname.outputs.zip_name }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
