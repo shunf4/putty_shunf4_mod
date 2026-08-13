@@ -32,50 +32,54 @@ drawn when the next cell is blank:
   Arrows + blank:    ← → ↑ ↓ ↔ ↕
   Roman numerals:    Ⅰ Ⅱ Ⅲ Ⅳ Ⅴ Ⅵ Ⅶ Ⅷ Ⅸ Ⅹ Ⅺ Ⅻ   ⅰ ⅱ ⅲ ⅳ ⅴ ⅵ ⅶ ⅷ ⅸ
   Enclosed digits:   ① ② ③ ④ ⑤ ⑥ ⑦ ⑧ ⑨ ⑩ ⑪ ⑫ ⑬ ⑭ ⑮ ⑯ ⑰ ⑱ ⑲ ⑳
+  Black circle:      ● ●
 
   When the next cell is a real character (not blank), these should be
   SQUEEZED into the half-width cell instead of overflowing:
   ←X →X ①X ⑤X
 
 
-Half-width default-text symbols whose glyph is wider than one cell.
-U+26A0 (WARNING SIGN) is the canonical case kept in the overflow table;
-rendered in colour in the emoji build, and overflowed when the right
-cell is blank:
-  Warning:   ⚠
-  With blank: ⚠ ⚠ ⚠
-  Squeezed against a character: ⚠X ⚠X ⚠X
+Half-width COLOUR symbols.  These occupy one cell and are drawn in colour
+(via DirectWrite); because a colour symbol wants a full-width glyph, they
+are ALSO in overflow_glyph_chars.h, so they overflow into a blank right
+cell with OR without a variation selector:
 
-  With VS15 (U+FE0E, force text style, monochrome; overflow follows the
-  bare symbol — U+26A0 still overflows into a blank right cell):
-  ⚠︎   ⚠︎X
+  Bare (no VS, right blank -> colour + overflow):
+  ☺ ❤ ☹ ⚠
 
-  With VS16 (U+FE0F, force emoji presentation, colour):
-  ⚠️
+  Bare (no VS, right solid -> colour + squeeze):
+  ☺X ❤X ☹X ⚠X
+
+  With VS16 (U+FE0F, force emoji/colour -> colour + overflow):
+  ☺️ ❤️ ☹️ ⚠️
+
+  With VS16 + solid right cell (colour + squeeze):
+  ☺️X ❤️X ⚠️X
+
+  With VS15 (U+FE0E, force text/monochrome -> MONO, but still overflows
+  because the base is an overflow glyph):
+  ☺︎ ⚠︎
+
+  With VS15 + solid right cell (MONO + squeeze):
+  ☺︎X ⚠︎X
 
 
-Emoji via U+FE0F (a half-width text-default symbol + VS16 -> colour
-emoji presentation).  These OCCUPY ONE cell in the buffer (half-width,
-so TUI apps that count columns aren't broken) and DRAW the full-width
-colour glyph overflowing into a blank right cell when one is available
-(GNOME Terminal / xterm / wezterm / Alacritty style; NOT Windows
-Terminal, which occupies two cells).  When the right neighbour is not
-blank the glyph is squeezed into its single cell.  VS16 never changes
-the buffer width — overflow is purely a drawing concern:
-  ❤️ ☺️ ☹️        (right cell blank -> overflow, draw 2 cells)
-  ❤️X ☺️X ☹️X      (right cell solid -> squeeze into 1 cell)
-
-Dedicated emoji (already East Asian Wide: occupy 2 cells, draw 2 cells).
-U+2615 HOT BEVERAGE belongs here (it is Wide), not with the half-width
-VS16 group above:
-  💜 🙂 🙁 👋 👍 😀 ☕
+Dedicated emoji (already East Asian Wide: occupy 2 cells, draw 2 cells,
+NEVER overflow).  U+2615 HOT BEVERAGE, U+26A1 HIGH VOLTAGE and U+2705
+WHITE HEAVY CHECK MARK belong here (they are Wide), not with the
+half-width group above:
+  😀 ☕ ⚡ ✅ 💜 🙁 👋 👍
 
 A Wide emoji followed by VS16 stays Wide (2 cells) — VS16 must NOT
 collapse a Wide emoji to half-width:
-  😀️ 🙂️ ☕️
+  😀️ ☕️
+
+A Wide emoji followed by VS15 stays Wide but turns monochrome:
+  ☕︎ ⚡︎
 
 Emoji forced to colour from a text default (U+3299 ㊙ is outside the
-broad emoji blocks and is added via the force-colour table):
+broad emoji blocks and is added via the force-colour table).  U+3299 is
+East Asian Wide, so it occupies 2 cells and does not overflow:
   ㊙ ㊙ ㊙
 
 Combined via ZWJ: 👩‍💻          (PuTTY doesn't understand ZWJ)
