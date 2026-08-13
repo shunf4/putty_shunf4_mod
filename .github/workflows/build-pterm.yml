@@ -17,6 +17,10 @@ on:
 permissions:
   contents: write   # needed by softprops/action-gh-release to create the release
 
+concurrency:
+  group: ${{ github.workflow }}-AllBranchesBuild
+  cancel-in-progress: true
+
 env:
   BUILD_TYPE: Release
 
