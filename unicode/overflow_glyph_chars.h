@@ -4,8 +4,8 @@
  * rendered overflowing into a neighbouring blank cell.
  *
  * These are mostly East Asian Ambiguous (width class A) symbols
- * whose typographic glyph is full-width, plus default-text-style
- * emoji.  Keeping them half-width in the buffer avoids breaking
+ * whose typographic glyph is full-width, plus half-width colour-emoji
+ * code points.  Keeping them half-width in the buffer avoids breaking
  * TUI applications (e.g. Claude Code) that assume width 1; the
  * renderer is then allowed to draw the full-width glyph spilling
  * into a blank cell on the right when one is available.
@@ -29,32 +29,21 @@
 {0x2190, 0x2199},
 /* Enclosed Alphanumerics: ① ② ... ⑳, ⓫ ⓬ ... ⓿ */
 {0x2460, 0x24ff},
+/* Black circle / circle: default-text overflow glyphs (not colour). */
+{0x25cf, 0x25cf},
+{0x25ef, 0x25ef},
 /*
- * Default-text-presentation emoji that are half-width (East Asian
- * Width Neutral, so width 1) yet whose monochrome glyph is wider than
- * a single cell.  WARNING SIGN (U+26A0) is the canonical example and
- * kept here as a bare-glyph overflow test case: in a non-colour-emoji
- * build it is drawn with the main font and benefits from overflowing
- * into a blank right-hand cell.  Emoji that are already East Asian
- * Wide (e.g. U+26A1, U+2705) are NOT listed here because they occupy
- * two cells already and need no overflow.
- *
- * Emoji that gain full-width presentation via VS16 (U+FE0F) are NOT
- * listed here either: their overflow is granted by the "this cell
- * carries a VS16 combining mark" rule in terminal.c's do_paint, not
- * by this table.  In colour-emoji builds all such glyphs are drawn
- * by the DirectWrite colour path, which has its own overflow handling.
+ * Half-width colour-emoji ranges, mirrored from the BMP entries of
+ * unicode/force_color_emoji_chars.h: a code point drawn in colour
+ * generally wants its full-width glyph overflowed into a blank
+ * right-hand cell.  Characters inside these ranges that are already
+ * East Asian Wide (e.g. U+26A1 HIGH VOLTAGE, U+2705 WHITE HEAVY CHECK
+ * MARK) occupy two cells already; terminal.c's (tattr & ATTR_WIDE)==0
+ * guard keeps them from being treated as overflow candidates.  Wide
+ * colour emoji outside the BMP (U+3299 and the SMP blocks) likewise
+ * need no overflow and are not listed.
  */
-{0x25cf, 0x25cf},   /* black circle */
-{0x25ef, 0x25ef},   /* circle */
-{0x2611, 0x2611},   /* ballot check */
-{0x2612, 0x2612},
-{0x2613, 0x2613},
-{0x26a0, 0x26a0},   /* ⚠ WARNING SIGN */
-{0x2713, 0x2713},   /* checkmark */
-{0x2716, 0x2716},
-{0x2717, 0x2717},
-{0x2718, 0x2718},   /* crosses */
-
-
-
+/* Misc Symbols */
+{0x2600, 0x26ff},
+/* Dingbats */
+{0x2700, 0x27bf},
