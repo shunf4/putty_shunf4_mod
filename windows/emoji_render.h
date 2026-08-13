@@ -24,9 +24,9 @@ void emoji_renderer_cleanup(void);
  * and the strings it points to must remain valid until cleanup. */
 void emoji_renderer_set_fonts(const WCHAR *const *names, int count);
 
-/* Should this code point be rendered as colour emoji?  Covers the
- * broad emoji blocks plus extra code points recorded in
- * unicode/force_color_emoji_chars.h (default-text emoji we force to
+/* Should this code point be rendered as colour emoji?  Binary-searches
+ * the sorted interval table in unicode/force_color_emoji_chars.h (the
+ * broad emoji blocks plus a few default-text code points forced to
  * colour).  A trailing VS15 (U+FE0E) overrides this and selects text
  * presentation. */
 bool emoji_should_render_color(unsigned int uc);

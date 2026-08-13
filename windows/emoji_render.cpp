@@ -138,34 +138,37 @@ extern "C" void emoji_renderer_cleanup(void)
     g_fmtDip = 0.0f;
 }
 
-/* Extra code points to force to colour beyond the broad ranges handled
- * inline below.  The canonical list lives in
- * unicode/force_color_emoji_chars.h; include it to keep a single
+/* Colour-emoji code points, binary-searched.  The canonical sorted list
+ * lives in unicode/force_color_emoji_chars.h; include it to keep a single
  * source of truth, exactly like unicode/overflow_glyph_chars.h. */
-struct fc_interval { unsigned int first, last; };
-static const struct fc_interval force_color_extra[] = {
+struct interval { unsigned int first, last; };
+static const struct interval color_emoji[] = {
     #include "unicode/force_color_emoji_chars.h"
 };
 
-extern "C" bool emoji_should_render_color(unsigned int uc)
+/* Binary search in a sorted interval table (same as wcwidth.c's
+ * bisearch()). */
+static bool bisearch(unsigned int uc, const struct interval *table, int max)
 {
-    if (uc >= 0x1F600 && uc <= 0x1F64F) return true;   /* Emoticons           */
-    if (uc >= 0x1F300 && uc <= 0x1F5FF) return true;   /* Misc Symbols & Pict */
-    if (uc >= 0x1F680 && uc <= 0x1F6FF) return true;   /* Transport & Map     */
-    if (uc >= 0x1F900 && uc <= 0x1F9FF) return true;   /* Supplemental Symbols */
-    if (uc >= 0x1FA00 && uc <= 0x1FAFF) return true;   /* Extended-A          */
-    if (uc >= 0x1F000 && uc <= 0x1F0FF) return true;   /* Mahjong / Cards     */
-    if (uc >= 0x1F1E6 && uc <= 0x1F1FF) return true;   /* Regional Indicators */
-    if (uc >= 0x2600  && uc <= 0x26FF)  return true;   /* Misc Symbols        */
-    if (uc >= 0x2700  && uc <= 0x27BF)  return true;   /* Dingbats            */
-    for (size_t i = 0;
-         i < sizeof(force_color_extra) / sizeof(force_color_extra[0]);
-         i++) {
-        if (uc >= force_color_extra[i].first &&
-            uc <= force_color_extra[i].last)
+    int min = 0, mid;
+    if (uc < table[0].first || uc > table[max].last)
+        return false;
+    while (max >= min) {
+        mid = (min + max) / 2;
+        if (uc > table[mid].last)
+            min = mid + 1;
+        else if (uc < table[mid].first)
+            max = mid - 1;
+        else
             return true;
     }
     return false;
+}
+
+extern "C" bool emoji_should_render_color(unsigned int uc)
+{
+    return bisearch(uc, color_emoji,
+                    sizeof(color_emoji) / sizeof(color_emoji[0]) - 1);
 }
 
 extern "C" bool emoji_render_color(
