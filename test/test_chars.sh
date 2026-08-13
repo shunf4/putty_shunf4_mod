@@ -15,16 +15,16 @@ export LC_ALL=C.UTF-8 2>/dev/null || export LC_ALL=en_US.UTF-8
 #   "occupy N cell(s)"  — buffer width / cursor advance.
 #   "draw N cell(s)"    — visible glyph width.
 #
-#   Half-width occupy + full-width draw (GNOME Terminal / xterm /
-#   wezterm / Alacritty style; NOT Windows Terminal's occupy-2-cells
-#   style): the character occupies 1 cell, and its glyph overflows into
-#   a blank right cell to draw 2 cells wide.  Overflow is drawing only;
-#   it never changes buffer width or cursor column.
-#
 #   "overflow" — glyph spills into a blank right cell (draw 2 cells).
 #   "squeeze"  — glyph compressed into its 1 cell (right neighbour not
 #                blank, or no cell to borrow at the right edge).
 #   "colour" / "mono" — DirectWrite colour vs monochrome glyph.
+#
+#   Wide (East Asian Wide) characters occupy 2 cells and NEVER overflow;
+#   the VS selector only decides colour vs monochrome, never width.
+#   Half-width characters occupy 1 cell; whether they overflow is decided
+#   by (a) membership in overflow_glyph_chars.h, or (b) a VS16 combining
+#   mark.  VS15 never grants overflow but does NOT suppress it either.
 #
 # Every "expect" line states the NUMBER of glyphs so a vanished emoji
 # is easy to spot.
@@ -32,13 +32,14 @@ export LC_ALL=C.UTF-8 2>/dev/null || export LC_ALL=en_US.UTF-8
 
 
 # ==================================================================
-# 1. Half-width symbols whose glyph is wider than one cell
-#    (arrows, Roman numerals, enclosed digits).  No variation selector.
-#    Occupy 1 cell; draw 2 cells when the right cell is blank.
+# 1. Half-width NON-colour overflow symbols (arrows, Roman numerals,
+#    enclosed digits, black circle).  No variation selector.  These are
+#    in overflow_glyph_chars.h but NOT in the colour table, so they
+#    render MONOCHROME and overflow when the right cell is blank.
 # ==================================================================
-echo "=== 1. Half-width symbols (no variation selector) ==="
+echo "=== 1. Half-width non-colour overflow symbols (mono) ==="
 echo "    occupy 1 cell; draw 2 cells (overflow) when right cell blank,"
-echo "    else squeeze into 1 cell."
+echo "    else squeeze into 1 cell.  MONOCHROME (not in colour table)."
 echo
 printf "  Arrows +space:     \U00002190 \U00002192 \U00002191 \U00002193\n"
 echo "    expect: 4 arrows, each draw 2 cells (overflow into the space)"
@@ -55,119 +56,103 @@ echo
 printf "  Circled tight:     \U00002460\U00002461\U00002462X\n"
 echo "    expect: 3 circled digits squeezed into 1 cell each, then 'X'"
 echo
+printf "  Black circle +sp:  \U000025CF \U000025CF\n"
+echo "    expect: 2 MONOCHROME black circles, each draw 2 cells (overflow,"
+echo "            NOT colour — U+25CF is not in the colour table)"
+echo
 
 # ==================================================================
-# 2. VS16 (U+FE0F) — emoji presentation on a HALF-width base.
-#    Occupy 1 cell; draw 2 cells (overflow) when the right neighbour
-#    is blank, else squeeze.  THIS IS THE CORE RULE.  Bases here are
-#    genuinely half-width (East Asian Width Neutral), unlike the Wide
-#    emoji in section 4.
+# 2. Half-width COLOUR symbols (smiley U+263A, frown U+2639,
+#    heart U+2764, warning U+26A0).  These are in BOTH the colour table
+#    AND overflow_glyph_chars.h, so they overflow with OR without VS16.
+#    The full VS x right-neighbour matrix is exercised below.
 # ==================================================================
-echo "=== 2. VS16 on half-width base (occupy 1, draw 2 when possible) ==="
-echo "    Base characters: U+263A U+2764 U+2639 (all half-width)."
+echo "=== 2. Half-width colour symbols (colour + overflow) ==="
+echo "    Bases: U+263A U+2764 U+2639 U+26A0 (all half-width, colour,"
+echo "          and now overflow glyphs)."
 echo
-echo "  -- right neighbour is SPACE (overflow expected, colour) --"
-printf "  +space:   \U0000263A\U0000FE0F \U00002764\U0000FE0F \U00002639\U0000FE0F\n"
-echo "    expect: 3 colour emoji (smiley, heart, frown), each draw 2 cells;"
-echo "            the separating spaces are borrowed for overflow, so the 3"
-echo "            emoji appear adjacent; 3 glyphs visible, none missing"
+
+echo "  -- (no VS, right = SPACE): colour + overflow --"
+printf "  bare+sp:  \U0000263A \U00002764 \U00002639 \U000026A0\n"
+echo "    expect: 4 COLOUR glyphs (smiley, heart, frown, warning), each draw"
+echo "            2 cells (overflow into the separating spaces); NOT mono"
 echo
-echo "  -- right neighbour is SOLID char (squeeze expected, colour) --"
-printf "  +solid:   \U0000263A\U0000FE0FX \U00002764\U0000FE0FX \U00002639\U0000FE0FX\n"
-echo "    expect: 3 colour emoji each squeezed into 1 cell (small, occupy 1 /"
-echo "            draw 1), 'X' right after; 3 emoji + 3 'X' visible, none missing"
+echo "  -- (no VS, right = SOLID): colour + squeeze --"
+printf "  bare+sd:  \U0000263AX \U00002764X \U00002639X\n"
+echo "    expect: 3 COLOUR glyphs each squeezed into 1 cell, 'X' right after;"
+echo "            NOT mono; 3 glyphs + 3 'X' visible"
+echo
+echo "  -- (VS16, right = SPACE): colour + overflow --"
+printf "  vs16+sp:  \U0000263A\U0000FE0F \U00002764\U0000FE0F \U00002639\U0000FE0F\n"
+echo "    expect: 3 colour emoji, each draw 2 cells (overflow into the space);"
+echo "            the separating spaces are borrowed, so the emoji look adjacent"
+echo
+echo "  -- (VS16, right = SOLID): colour + squeeze --"
+printf "  vs16+sd:  \U0000263A\U0000FE0FX \U00002764\U0000FE0FX \U00002639\U0000FE0FX\n"
+echo "    expect: 3 colour emoji each squeezed into 1 cell, 'X' right after"
+echo
+echo "  -- (VS15, right = SPACE): MONO + overflow (still an overflow glyph) --"
+printf "  vs15+sp:  \U0000263A\U0000FE0E \U000026A0\U0000FE0E\n"
+echo "    expect: 2 MONOCHROME glyphs (smiley, warning), each draw 2 cells."
+echo "            VS15 forces text/monochrome but does NOT suppress overflow"
+echo "            because the base is in overflow_glyph_chars.h"
+echo
+echo "  -- (VS15, right = SOLID): MONO + squeeze --"
+printf "  vs15+sd:  \U0000263A\U0000FE0EX \U000026A0\U0000FE0EX\n"
+echo "    expect: 2 monochrome glyphs squeezed into 1 cell each, 'X' after"
 echo
 echo "  -- at END OF LINE (no cell to borrow) --"
-printf "  eol:      \U0000263A\U0000FE0F\n"
-echo "    expect: 1 colour emoji at line end; squeezed or clipped at the"
-echo "            right edge, NOT blank/black; 1 glyph visible"
+printf "  eol-bare: \U0000263A\n"
+printf "  eol-vs16: \U0000263A\U0000FE0F\n"
+printf "  eol-vs15: \U000026A0\U0000FE0E\n"
+echo "    expect: each line's trailing glyph is squeezed/clipped at the right"
+echo "            edge, NOT blank/black; colour where no VS15, mono for VS15"
 echo
 
 # ==================================================================
-# 3. VS15 (U+FE0E) — text (monochrome) presentation.
-#    Forces a monochrome glyph; VS15 must NOT trigger colour rendering.
-#    NOTE on overflow: VS15 does NOT itself grant overflow (only VS16
-#    does, or membership in overflow_glyph_chars.h).  So a VS15 base
-#    overflows ONLY if the bare base is already an overflow glyph
-#    (U+26A0 WARNING is).  U+2639 frown is NOT, so VS15 frown never
-#    overflows even with a blank right cell.
+# 3. Wide (East Asian Wide) colour emoji — occupy 2 cells, draw 2 cells,
+#    NEVER overflow.  U+2615 HOT BEVERAGE, U+26A1 HIGH VOLTAGE,
+#    U+2705 WHITE HEAVY CHECK, and SMP U+1F600 are all wcwidth 2.
+#    The VS selector only picks colour vs mono; width stays 2.
 # ==================================================================
-echo "=== 3. VS15 text presentation (monochrome) ==="
-echo "    Bases: U+26A0 (overflow glyph) and U+2639 (not)."
+echo "=== 3. Wide colour emoji (occupy 2, draw 2, never overflow) ==="
+echo "    U+1F600 U+2615 U+26A1 U+2705 are East Asian Wide (wcwidth 2)."
 echo
-echo "  -- U+26A0 + VS15, right neighbour SPACE (overflow, MONO) --"
-printf "  warn+sp:  \U000026A0\U0000FE0E \U000026A0\U0000FE0E\n"
-echo "    expect: 2 MONOCHROME warning glyphs, each draw 2 cells (overflow,"
-echo "            because U+26A0 is an overflow glyph); NOT colour; 2 glyphs"
+printf "  Wide:        \U0001F600 \U00002615 \U000026A1 \U00002705\n"
+echo "    expect: 4 colour emoji (grin, coffee, bolt, check), each 2 cells"
 echo
-echo "  -- U+2639 + VS15, right neighbour SPACE (NO overflow, MONO) --"
-printf "  frown+sp: \U00002639\U0000FE0E \U00002639\U0000FE0E\n"
-echo "    expect: 2 MONOCHROME frown glyphs, each occupy+draw 1 cell (NO"
-echo "            overflow — VS15 does not grant it and U+2639 is not an"
-echo "            overflow glyph); NOT colour; 2 glyphs, space remains"
+printf "  Wide + VS16: \U0001F600\U0000FE0F \U00002615\U0000FE0F\n"
+echo "    expect: 2 colour emoji, STILL 2 cells each (VS16 must NOT shrink"
+echo "            a Wide emoji to 1 cell); 2 glyphs, none missing"
 echo
-echo "  -- U+26A0 + VS15, right neighbour SOLID (squeeze, MONO) --"
-printf "  warn+sd:  \U000026A0\U0000FE0EX \U000026A0\U0000FE0EX\n"
-echo "    expect: 2 monochrome warning glyphs squeezed into 1 cell each,"
-echo "            'X' after; 2 glyphs + 2 'X'"
-echo
-echo "  -- at END OF LINE --"
-printf "  eol:      \U000026A0\U0000FE0E\n"
-echo "    expect: 1 monochrome warning glyph at line end, NOT colour/blank/black"
-echo
-
-# ==================================================================
-# 4. Bare WARNING sign U+26A0 (the single case retained in
-#    overflow_glyph_chars.h).  Half-width; no variation selector.
-# ==================================================================
-echo "=== 4. Bare WARNING sign (no variation selector) ==="
-echo
-printf "  +space:   \U000026A0 \U000026A0 \U000026A0\n"
-echo "    expect: 3 warning glyphs, each draw 2 cells"
-echo
-printf "  +solid:   \U000026A0X \U000026A0X\n"
-echo "    expect: 2 warning glyphs squeezed into 1 cell each, 'X' after"
-echo
-
-# ==================================================================
-# 5. Wide (SMP) emoji — East Asian Wide, occupy 2 cells, draw 2 cells.
-#    These are DIFFERENT from sections 2-3: wcwidth already returns 2,
-#    so there is no "occupy 1 draw 2" possibility.  VS16 on a Wide
-#    emoji must NOT collapse it to half-width — it keeps 2 cells.
-#    U+2615 HOT BEVERAGE belongs here (it is Wide), NOT in section 2/3.
-# ==================================================================
-echo "=== 5. Wide (SMP) emoji: occupy 2 cells, draw 2 cells ==="
-echo "    U+1F600 U+1F642 U+2615 are all East Asian Wide (wcwidth 2)."
-echo
-printf "  Wide:        \U0001F600 \U0001F642 \U00002615\n"
-echo "    expect: 3 colour emoji (grin, smile, coffee), each occupy+draw 2 cells"
-echo
-printf "  Wide + VS16: \U0001F600\U0000FE0F \U0001F642\U0000FE0F \U00002615\U0000FE0F\n"
-echo "    expect: 3 colour emoji, STILL 2 cells each (VS16 must NOT shrink"
-echo "            a Wide emoji to 1 cell); 3 glyphs visible, none missing"
+printf "  Wide + VS15: \U00002615\U0000FE0E \U000026A1\U0000FE0E\n"
+echo "    expect: 2 MONOCHROME emoji, STILL 2 cells each (VS15 forces text/"
+echo "            monochrome but width stays 2); NOT colour"
 echo
 printf "  Wide+solid:  \U0001F600X \U0001F642X\n"
 echo "    expect: 2 colour emoji (2 cells each) then 'X'; 2 glyphs + 2 'X'"
 echo
 
 # ==================================================================
-# 6. Forced-colour emoji (U+3299 CIRCLED SECRET — outside the broad
-#    colour blocks; forced via force_color_emoji_chars.h).
+# 4. Forced-colour emoji (U+3299 CIRCLED SECRET — outside the broad
+#    colour blocks; forced via force_color_emoji_chars.h).  U+3299 is
+#    East Asian Wide, so it occupies 2 cells and does not overflow.
 # ==================================================================
-echo "=== 6. Forced-colour emoji (U+3299) ==="
+echo "=== 4. Forced-colour emoji (U+3299, wide) ==="
 echo
 printf "  forced:  \U00003299 \U00003299 \U00003299\n"
-echo "    expect: 3 colour 'SECRET' glyphs (forced colour), each 2 cells"
+echo "    expect: 3 colour 'SECRET' glyphs (forced colour), each 2 cells;"
+echo "            wide so NO overflow"
 echo
 
 # ==================================================================
-# 7. Right-edge behaviour.  A long run of SYMBOL/emoji (NOT ASCII) is
+# 5. Right-edge behaviour.  A long run of SYMBOL/emoji (NOT ASCII) is
 #    printed so it wraps and the trailing test glyphs land on the
 #    terminal's right edge.  This exercises the three combinations at
 #    the edge:
 #       (a) occupy 1, draw 1  — bare half-width symbol packed tight
-#       (b) occupy 1, draw 2  — VS16 half-width emoji, wants overflow
-#                               but at the edge there is no cell to borrow
+#       (b) occupy 1, draw 2  — half-width emoji, wants overflow but at
+#                               the edge there is no cell to borrow
 #       (c) occupy 2, draw 2  — Wide emoji straddling the edge
 #    The prefix is EDGE_PREFIX copies of U+2460 circled-one (occupy 1,
 #    draw 1 when packed).  EDGE_PREFIX defaults to 230 (≈3× a 76-col
@@ -186,7 +171,7 @@ while [ "$_i" -lt "$EDGE_PREFIX" ]; do
     _i=$((_i + 1))
 done
 prefix=$(printf '\U00002460%.0s' "${circled_prefix_array[@]}")
-echo "=== 7. Right-edge behaviour (symbol/emoji at the terminal edge) ==="
+echo "=== 5. Right-edge behaviour (symbol/emoji at the terminal edge) ==="
 echo "    Prefix = $EDGE_PREFIX x circled-one (occupy 1, draw 1), 2-col indent."
 echo "    Long enough to wrap on common widths so the trailing glyph hits the"
 echo "    right edge.  Set EDGE_PREFIX=<cols-3> to land it on the last column."
@@ -197,9 +182,9 @@ echo "    expect: $EDGE_PREFIX circled-ones (occupy+draw 1 each); where the run"
 echo "            meets the right edge the glyphs squeeze/clip cleanly, NOT black;"
 echo "            the line wraps to the next row"
 echo
-echo "  (b) occupy 1 / draw 2 — VS16 half-width emoji at the edge:"
+echo "  (b) occupy 1 / draw 2 — half-width emoji at the edge:"
 printf ' %s\U0000263A\U0000FE0F\n' "$prefix"
-echo "    expect: $EDGE_PREFIX circled-ones then 1 VS16 smiley.  Where the smiley"
+echo "    expect: $EDGE_PREFIX circled-ones then 1 smiley.  Where the smiley"
 echo "            lands at the right edge it wants overflow but has no cell to"
 echo "            borrow, so it squeezes or clips — NOT blank/black;"
 echo "            $((EDGE_PREFIX+1)) glyphs, 1 emoji; line wraps"
@@ -214,12 +199,11 @@ echo
 echo
 
 # ==================================================================
-# 8. Mixed runs — emoji interleaved with ASCII.  This is the case that
-#    originally exposed emoji being erased by following characters
-#    (when VS16 promoted them to 2-cell wide and the overwrite logic
-#    clobbered them).  All three emoji must remain visible.
+# 6. Mixed runs — emoji interleaved with ASCII.  This is the case that
+#    originally exposed emoji being erased by following characters.
+#    All emoji must remain visible.
 # ==================================================================
-echo "=== 8. Mixed runs (regression: emoji must not vanish) ==="
+echo "=== 6. Mixed runs (regression: emoji must not vanish) ==="
 echo
 printf "  \U0000263A\U0000FE0F a \U00002764\U0000FE0F b \U00002639\U0000FE0F c\n"
 echo "    expect: smiley, 'a', heart, 'b', frown, 'c' — 3 emoji + 3 letters."
@@ -237,12 +221,12 @@ echo "            1 full-width.  All 3 glyphs must remain present (none erased)"
 echo
 
 # ==================================================================
-# 9. Composed emoji.
+# 7. Composed emoji.
 #    ZWJ sequences and skin-tone modifiers are NOT expected to work
 #    (PuTTY's wcwidth does not model them — see utf8.txt).  Regional
 #    flags ARE expected to work.
 # ==================================================================
-echo "=== 9. Composed emoji ==="
+echo "=== 7. Composed emoji ==="
 echo
 printf "  ZWJ:       \U0001F469\U0000200D\U0001F4BB\n"
 echo "    expect (KNOWN FAILURE): NOT rendered as a single woman-technologist"
