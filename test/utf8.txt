@@ -23,10 +23,9 @@ Mixed LTR and RTL text: [44mجرير[m [41mرضي[m back to LTR.
 East Asian Ambiguous characters (half-width by default): ¼½¾¼½¾¼½¾¼½¾¼½¾¼½¾¼½¾¼½¾¼½¾¼½¾
 
 
-Overflowable symbols (half-width cell, glyph may spill into a blank
-cell on the right).  These are half-width in the buffer so TUI
-applications that assume width 1 don't misalign, but the full glyph is
-drawn when the next cell is blank:
+Overflowable NON-colour symbols (half-width cell, monochrome glyph spills
+into a blank cell on the right).  These are in overflow_glyph_chars.h but
+NOT in the colour table, so they render monochrome:
 
   Arrows:            ← → ↑ ↓ ↔ ↕ ↖ ↗ ↘ ↙
   Arrows + blank:    ← → ↑ ↓ ↔ ↕
