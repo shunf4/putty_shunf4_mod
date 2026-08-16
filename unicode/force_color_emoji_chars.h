@@ -24,6 +24,8 @@
  * Manually maintained — not auto-generated from UCD data.
  */
 
+/* INFORMATION SOURCE ℹ (default text presentation, colour via VS16) */
+{0x2139, 0x2139},
 /* Misc Symbols */
 {0x2600, 0x26ff},
 /* Dingbats */
