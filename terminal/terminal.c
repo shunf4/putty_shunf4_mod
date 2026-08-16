@@ -3501,20 +3501,16 @@ static void term_display_graphic_char(Terminal *term, unsigned long c)
 
             /*
              * U+FE0F (Variation Selector 16) requests emoji
-             * presentation of the preceding character.  We deliberately
-             * do NOT promote the base to a full-width (two-cell)
-             * character here: occupying a second cell would put the base
-             * inside the terminal's wide-character overwrite logic, so a
-             * following space or printable character would erase the base
-             * (left half turned to space) — exactly the "emoji vanishes
-             * except at end of line" symptom.
-             *
-             * Instead the base stays half-width in the buffer (keeping
-             * TUI column alignment intact) and VS16 is attached as a
-             * combining mark.  The front end renders the glyph
+             * presentation of the preceding character.  The base
+             * character's buffer occupancy stays exactly what
+             * wcwidth said (half-width for e.g. U+2764 HEART,
+             * already two cells for East Asian Wide bases such as
+             * U+26A1 HIGH VOLTAGE SIGN); VS16 is attached as a
+             * combining mark and is honoured purely as a drawing
+             * concern: the renderer draws the full-width emoji glyph
              * overflowing into a blank right-hand cell when one is
-             * available, and squeezed into the single cell otherwise —
-             * purely a drawing concern, never a buffer-occupancy one.
+             * available, and squeezed into the single cell otherwise.
+             * See the large comment in do_paint's overflow decision.
              */
             add_cc(cline, x, c);
             seen_disp_event(term);
@@ -6061,9 +6057,22 @@ static termchar *term_bidi_line(Terminal *term, struct termline *ldata,
                         if (term->ltemp[opos].cc_next)
                             term->ltemp[opos].cc_next -= opos - ipos;
 
-                        if (j > 0)
+                        if (j > 0) {
                             term->ltemp[opos].chr = UCSWIDE;
-                        else if (term->wcTo[it].origwc != term->wcTo[it].wc)
+                            /*
+                             * The right-hand half of a wide character
+                             * is fabricated by copying the base cell
+                             * above — including its combining-character
+                             * chain, which must be dropped: the chain
+                             * belongs to the base half only.  Leaving
+                             * it aliased onto both halves made e.g.
+                             * cell_has_vs16() see a VS16 on the UCSWIDE
+                             * cell, which do_paint's overflow logic
+                             * then misinterpreted (phantom-generating
+                             * ATTR_NO_BG on the following cell).
+                             */
+                            term->ltemp[opos].cc_next = 0;
+                        } else if (term->wcTo[it].origwc != term->wcTo[it].wc)
                             term->ltemp[opos].chr = term->wcTo[it].wc;
                     } else {
                         term->ltemp[opos] = term->basic_erase_char;
@@ -6357,20 +6366,11 @@ static void do_paint(Terminal *term)
              * │ right-hand cell when one is available, or squeezed into  │
              * │ the single cell when not.  Overflow is purely a drawing  │
              * │ concern — it never changes the buffer width or cursor    │
-             * │ column.                                                  │
-             * │                                                          │
-             * │ This is also why VS16 does NOT promote the base to a     │
-             * │ two-cell UCSWIDE character here (an earlier attempt did  │
-             * │ that and the terminal's wide-character overwrite logic   │
-             * │ then erased such emoji the moment a following space or   │
-             * │ printable character landed on their right half — they    │
-             * │ vanished everywhere except at end of line).              │
-             * │                                                          │
-             * │ SMP emoji that are already East Asian Wide (U+1F600      │
-             * │ etc.) keep their genuine two-cell width; the (tattr &    │
-             * │ ATTR_WIDE)==0 guard below excludes them, so a Wide      │
-             * │ emoji followed by VS16 is handled as the wide cell it    │
-             * │ already is and never mistakenly treated as half-width.   │
+             * │ column.  (Base characters that wcwidth already says are  │
+             * │ wide — e.g. U+26A1 HIGH VOLTAGE SIGN, SMP emoji — are    │
+             * │ two-cell wide characters from the start and never take   │
+             * │ this path; the (tattr & ATTR_WIDE)==0 guard excludes     │
+             * │ them.)                                                   │
              * └──────────────────────────────────────────────────────────┘
              *
              * When overflow isn't possible (non-blank neighbour or end
@@ -6378,7 +6378,18 @@ static void do_paint(Terminal *term)
              * (ATTR_NARROW) and naturally-half-width ones are left as
              * a plain single-cell render.
              */
+            /*
+             * Note the tchar != UCSWIDE guard: the right-hand half of
+             * a wide character is not a character at all and must never
+             * be an overflow candidate.  Its own tattr lacks ATTR_WIDE
+             * (the WIDE bit sits on the base cell only), so the guard
+             * above would not keep it out — and a UCSWIDE cell marked
+             * OVERFLOW_OK would in turn NO_BG the following blank cell,
+             * whose background then nobody ever repaints (the UCSWIDE
+             * cell itself is never drawn), leaving a ghost.
+             */
             if ((tattr & ATTR_WIDE) == 0 &&
+                tchar != UCSWIDE &&
                 (mk_is_overflow_glyph((unsigned int)(tchar)) ||
                  cell_has_vs16(d))) {
                 /*
@@ -6463,6 +6474,20 @@ static void do_paint(Terminal *term)
                 (term->disptext[i]->chars[j].attr &~ DATTR_MASK)
                 != newline[j].attr) {
                 int k;
+
+                /*
+                 * If the changing cell is borrowed by an overflowing
+                 * left-hand neighbour, that neighbour must be redrawn
+                 * as well: the borrower draws nothing of its own
+                 * (ATTR_NO_BG suppresses its background erase), so the
+                 * only thing that can re-cover the borrower's cell —
+                 * e.g. after the cursor or a selection leaves it, or
+                 * after different content scrolls into it — is the
+                 * lender's redraw, which erases both cells and paints
+                 * the overflowing glyph afresh.
+                 */
+                if (j > 0 && (newline[j - 1].attr & ATTR_OVERFLOW_OK))
+                    term->disptext[i]->chars[j - 1].attr |= ATTR_INVALID;
 
                 if (!dirtyrect) {
                     for (k = laststart; k < j; k++)
