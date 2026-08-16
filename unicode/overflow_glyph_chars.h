@@ -19,6 +19,8 @@
  * Manually maintained — not auto-generated from UCD data.
  */
 
+/* INFORMATION SOURCE ℹ (default text presentation, colour via VS16) */
+{0x2139, 0x2139},
 /* Roman Numerals: Ⅰ Ⅱ Ⅲ Ⅳ Ⅴ Ⅵ Ⅶ Ⅷ Ⅸ Ⅹ Ⅺ Ⅻ */
 {0x2160, 0x216b},
 /* Roman Numerals (lowercase): ⅰ ⅱ ⅲ ⅳ ⅴ ⅵ ⅶ ⅷ ⅸ */
