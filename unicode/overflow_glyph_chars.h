@@ -31,9 +31,21 @@
 {0x2190, 0x2199},
 /* Enclosed Alphanumerics: ① ② ... ⑳, ⓫ ⓬ ... ⓿ */
 {0x2460, 0x24ff},
-/* Black circle / circle: default-text overflow glyphs (not colour). */
+/* Geometric Shapes: default-text overflow glyphs (not colour);
+ * ■ □ ▲ ▶ ▼ ◀ ◈ ◉ ○ ⊙ ⊚ ● ◐–◒ ◓–◷ ◧–∌ ◿
+ * (black circle U+25CF and large circle U+25EF are subsumed). */
+{0x25a0, 0x25a9},
+{0x25b2, 0x25b2},
+{0x25b6, 0x25b7},
+{0x25bc, 0x25bc},
+{0x25c0, 0x25c1},
+{0x25c8, 0x25c9},
+{0x25cb, 0x25cd},
 {0x25cf, 0x25cf},
-{0x25ef, 0x25ef},
+{0x25d0, 0x25d7},
+{0x25d9, 0x25db},
+{0x25e7, 0x25fc},
+{0x25ef, 0x25ff},
 /*
  * Half-width colour-emoji ranges, mirrored from the BMP entries of
  * unicode/force_color_emoji_chars.h: a code point drawn in colour
