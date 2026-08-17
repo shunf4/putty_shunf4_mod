@@ -27,8 +27,9 @@
 {0x2170, 0x2179},
 /* Roman Numeral Reversed One Hundred */
 {0x2189, 0x2189},
-/* Arrows: ← → ↑ ↓ ↔ ↕ ↖ ↗ ↘ ↙ */
+/* Arrows: ← → ↑ ↓ ↔ ↕ ↖ ↗ ↘ ↙, ↳ */
 {0x2190, 0x2199},
+{0x21b3, 0x21b3},
 /* Enclosed Alphanumerics: ① ② ... ⑳, ⓫ ⓬ ... ⓿ */
 {0x2460, 0x24ff},
 /* Geometric Shapes: default-text overflow glyphs (not colour);
