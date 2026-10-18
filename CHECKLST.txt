@@ -27,8 +27,8 @@ pre-releases on the website:
    add a news announcement in components/news. (Previous naming
    convention has been to name it in the form 'X.YZ-pre.mi'.)
 
- - Optionally: write an announcement email for the availability of
-   pre-releases, and send it out to <putty-announce@lists.tartarus.org>.
+ - Optionally: write an announcement of the availability of
+   pre-releases, and include it in the announcements RSS feed.
 
 Things to do during the branch-stabilisation period:
 
@@ -51,8 +51,6 @@ Things to do during the branch-stabilisation period:
     + build with all three major versions of GTK
     + build the old-Windows binaries and test-run them on Win95 (PuTTY
       proper even without WinSock2)
-
- - Check Coverity is happy.
 
  - Check the side-channel tester is happy.
 
@@ -144,12 +142,11 @@ Making a release candidate build
        + test-build with -DNOT_X_WINDOWS (compile flag)
        + test-build with -DPUTTY_GSSAPI=OFF (cmake flag)
        + test-build with -DPUTTY_IPV6=OFF (cmake flag)
+       + test-build with -DJUST_USE_GTK_CLIPBOARD_UTF8 (compile flag)
     * test that the Windows source builds with Visual Studio (just in
       case there's an unguarded clangism that would prevent it)
     * quick check of the outlying network protocols (Telnet, SUPDUP
       etc)
-    * feed the release-candidate source to Coverity and make sure it
-      didn't turn up any last-minute problems
     * make sure we have a clean run of testsc
     * do some testing on a system with a completely clean slate (no
       prior saved session data)
@@ -283,9 +280,9 @@ entries etc, this is the procedure for putting it all up on the web.
        * provide a new set of installer URLs, then click "save all"
          which actually uploads them
           + be careful to use URLs without "latest" in the pathname!
-            Just copying from the links on the download page is wrong.
-            Change "latest" to the version number, and test-download
-            via those URLs to check you didn't make a typo.
+            Go to the Changes page and click on the actual version
+            number, which gives the URLs that explicitly mention that
+            version.
        * change the "what's new in this release" text in the store
          listing
        * upload revised screenshots, if necessary
@@ -294,16 +291,11 @@ entries etc, this is the procedure for putting it all up on the web.
       time) to submit that to the actual upload process
 
  - Announce the release!
-    + Construct a release announcement email whose message body is the
-      announcement written above, and which includes the following
-      headers:
-       * Reply-To: <putty@projects.tartarus.org>
-       * Subject: PuTTY X.YZ is released
-    + Mail that release announcement to
-      <putty-announce@lists.tartarus.org>.
-    + Post it to comp.security.ssh.
+    + Make a plain-text version of the announcement HTML used in the
+      RSS release announcement feed.
+    + Post that text announcement to comp.security.ssh.
     + Post the prepared toot to Mastodon.
-    + Mention it in <TDHTT> on mono.
+    + Mention the release in <TDHTT> on mono.
 
  - Edit the master ~/adm/puttysnap.sh to disable pre-release builds,
    if they were previously enabled.
