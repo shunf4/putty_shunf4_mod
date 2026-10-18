@@ -32,14 +32,17 @@ NOT in the colour table, so they render monochrome:
   Roman numerals:    Ⅰ Ⅱ Ⅲ Ⅳ Ⅴ Ⅵ Ⅶ Ⅷ Ⅸ Ⅹ Ⅺ Ⅻ   ⅰ ⅱ ⅲ ⅳ ⅴ ⅵ ⅶ ⅷ ⅸ
   Enclosed digits:   ① ② ③ ④ ⑤ ⑥ ⑦ ⑧ ⑨ ⑩ ⑪ ⑫ ⑬ ⑭ ⑮ ⑯ ⑰ ⑱ ⑲ ⑳
   Black circle:      ● ●
-  Media control:     U+23CF U+23ED U+23EE U+23EF U+23F8 U+23F9 U+23FA
-  Geometric shapes:  U+25B6 B7 B8 B9 BA BB BC BD BE BF
-                     U+25C0-C7 (except C8/C9 which were already listed)
-                     U+25D8-DB, U+25DC-E6, U+25E7-FF (minus Wide 25FD/FE)
+  Media control:     ⏏ ⏮ ⏭ ⏯ ⏸ ⏹ ⏺
+  Geometric shapes:  ▶ ▸ ▹ ► ▻ ▼ ▽ ▾ ▿ ◀ ◁ ◂ ◃ ◄ ◅ ◈ ◉ ◇ ◊ ◎ ○ ◐ ◑ ◒ ◓
+                     ◘ ◙ ◚ ◛ ◜ ◝ ◞ ◟ ◠ ◡ ◢ ◣ ◤ ◥ ◧ ◨ ◩ ◪ ◫ ◬ ◭ ◮ ◯
+                     ◰ ◱ ◲ ◳ ◴ ◵ ◶ ◷ ◸ ◹ ◺ ◻ ◼ ◿
+  (◽ ◾ are East Asian Wide - 2 cells, so they never overflow; they are
+  not in overflow_glyph_chars.h.  ▪ ▫ ▬ ▭ ▮ ▯ ▰ ▱ △ ▴ ▵ are deliberately
+  NOT in the table: "small" marks and bars must not be stretched.)
 
   When the next cell is a real character (not blank), these should be
   SQUEEZED into the half-width cell instead of overflowing:
-  ←X →X ①X ⑤X
+  ←X →X ①X ⑤X ⏸X ▶X
 
 
 Half-width COLOUR symbols.  These occupy one cell and are drawn in colour
