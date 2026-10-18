@@ -16,16 +16,20 @@ cp() { # cp <hex-without-0x>
 }
 
 codes=(
+    23cf 23ed 23ee 23ef 23f8 23f9 23fa
     25a0 25a1 25a2 25a3 25a4 25a5 25a6 25a7 25a8 25a9
     25b2
-    25b6 25b7
-    25bc
-    25c0 25c1
+    25b6 25b7 25b8 25b9 25ba 25bb
+    25bc 25bd 25be 25bf
+    25c0 25c1 25c2 25c3 25c4 25c5 25c6 25c7
     25c8 25c9
+    25ca
     25cb 25cc 25cd
+    25ce
     25cf
     25d0 25d1 25d2 25d3 25d4 25d5 25d6 25d7
-    25d9 25da 25db
+    25d8 25d9 25da 25db
+    25dc 25dd 25de 25df 25e0 25e1 25e2 25e3 25e4 25e5 25e6
     25e7 25e8 25e9 25ea 25eb 25ec 25ed 25ee 25ef 25f0 25f1 25f2 25f3
     25f4 25f5 25f6 25f7 25f8 25f9 25fa 25fb 25fc
     25ff
