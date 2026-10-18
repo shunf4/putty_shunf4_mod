@@ -28,7 +28,7 @@ FontSpec *fontspec_new_from_override(const char *value)
      */
     const char *comma = strchr(value, ',');
     char *name;
-    int height = 10, bold = 0, charset = ANSI_CHARSET;
+    int height = 15, bold = 0, charset = ANSI_CHARSET;
 
     if (!comma) {
         /* Just a font name, no extras */
