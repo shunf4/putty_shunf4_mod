@@ -15,6 +15,10 @@ cp() { # cp <hex-without-0x>
     printf "\\$(printf '%03o' $((0xE0 | (n >> 12))))\\$(printf '%03o' $((0x80 | ((n >> 6) & 0x3F))))\\$(printf '%03o' $((0x80 | (n & 0x3F))))"
 }
 
+# Every code point listed in overflow_glyph_chars.h, in table order
+# (23CF/23ED-23EF/23F8-23FA media control, then Geometric Shapes).
+# U+25FD/U+25FE are deliberately absent: they are East Asian Wide, so
+# they occupy two cells and never take the overflow path.
 codes=(
     23cf 23ed 23ee 23ef 23f8 23f9 23fa
     25a0 25a1 25a2 25a3 25a4 25a5 25a6 25a7 25a8 25a9
