@@ -802,6 +802,8 @@ void test_simple(void)
     test_file_simple(CONF_bell_wavefile, "BellWaveFile");
     test_bool_simple(CONF_scrollbar, "ScrollBar", true);
     test_bool_simple(CONF_scrollbar_in_fullscreen, "ScrollBarFullScreen", false);
+    test_bool_simple(CONF_disable_scrollbar_in_altscreen,
+                     "DisableScrollbarInAltScreen", true);
     test_int_translated(CONF_resize_action, "LockSize", RESIZE_TERM,
                         RESIZE_TERM, 0, RESIZE_DISABLED, 1, RESIZE_FONT, 2,
                         RESIZE_EITHER, 3, -1);

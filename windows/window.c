@@ -2863,6 +2863,22 @@ static void wm_size_resize_term(WinGuiSeat *wgs, LPARAM lParam)
     conf_set_int(wgs->conf, CONF_width, w);
 }
 
+static bool sbar_disabled_in_altscreen(WinGuiSeat *wgs)
+{
+    /*
+     * While the alternate screen is in use (e.g. vim, less, htop), it
+     * has no scrollback of its own, so the scrollbar is greyed out
+     * and scrolling is disabled until the primary screen comes back.
+     *
+     * Exception: with 'push erased text into scrollback' enabled, the
+     * alternate screen does have usable (virtual) scrollback, so the
+     * scrollbar stays live in that case.
+     */
+    return wgs->term && wgs->term->alt_which != 0 &&
+        conf_get_bool(wgs->conf, CONF_disable_scrollbar_in_altscreen) &&
+        !conf_get_bool(wgs->conf, CONF_erase_to_scrollback);
+}
+
 static LRESULT CALLBACK WndProc(HWND hwnd, UINT message,
                                 WPARAM wParam, LPARAM lParam)
 {
@@ -3798,6 +3814,8 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT message,
         reset_window(wgs, 3);
         return 0;
       case WM_VSCROLL:
+        if (sbar_disabled_in_altscreen(wgs))
+            break;         /* no scrolling while the alternate screen is up */
         switch (LOWORD(wParam)) {
           case SB_BOTTOM:
             term_scroll(wgs->term, -1, 0);
@@ -4117,12 +4135,13 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT message,
                                    TO_CHR_Y(p.y), shift_pressed,
                                    control_pressed, is_alt_pressed());
                     } /* else: not sure when this can fail */
-                } else if (wgs->term->alt_which &&
+                } else if (sbar_disabled_in_altscreen(wgs) &&
                            message != WM_MOUSEHWHEEL) {
                     /*
-                     * In alternate screen buffer (e.g. vim, less), there
-                     * is no scrollback, so translate mouse wheel into
-                     * arrow key events instead of scrolling.
+                     * In alternate screen buffer (e.g. vim, less), with
+                     * the scrollbar disabled, there is no way to scroll,
+                     * so translate mouse wheel into arrow key events
+                     * instead of scrolling.
                      */
                     char abuf[32];
                     int alen = format_arrow_key(
@@ -5363,7 +5382,9 @@ static int TranslateKey(WinGuiSeat *wgs, UINT message, WPARAM wParam,
             return 0;
         }
         if ((wParam == VK_PRIOR || wParam == VK_NEXT) && shift_state == 3) {
-            term_scroll_to_selection(wgs->term, (wParam == VK_PRIOR ? 0 : 1));
+            if (!sbar_disabled_in_altscreen(wgs))
+                term_scroll_to_selection(wgs->term,
+                                         (wParam == VK_PRIOR ? 0 : 1));
             return 0;
         }
         if (wParam == VK_INSERT && shift_state == 2) {
@@ -5851,6 +5872,22 @@ static void wintw_set_scrollbar(TermWin *tw, int total, int start, int page)
 {
     WinGuiSeat *wgs = container_of(tw, WinGuiSeat, termwin);
     SCROLLINFO si;
+
+    if (sbar_disabled_in_altscreen(wgs)) {
+        /*
+         * The alternate screen is showing: report an empty scroll
+         * range, so that SIF_DISABLENOSCROLL below greys the
+         * scrollbar out while keeping its space in the window layout.
+         *
+         * Also abandon any scrolled-back view of the primary screen's
+         * scrollback, since the user can no longer scroll while the
+         * alternate screen is up.
+         */
+        total = page;
+        start = 0;
+        if (wgs->term->disptop != 0)
+            wgs->term->disptop = 0;
+    }
 
     if (!conf_get_bool(wgs->conf, is_full_screen(wgs) ?
                        CONF_scrollbar_in_fullscreen : CONF_scrollbar))
