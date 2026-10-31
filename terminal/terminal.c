@@ -1918,6 +1918,13 @@ void term_reconfig(Terminal *term, Conf *conf)
     term_schedule_tblink(term);
     term_schedule_cblink(term);
     term_update_raw_mouse_mode(term);
+
+    /*
+     * Scrollbar display can depend on config (e.g. whether it's
+     * greyed out in the alternate screen), so refresh it.
+     */
+    term->win_scrollbar_update_pending = true;
+    term_schedule_update(term);
 }
 
 /*
@@ -2519,6 +2526,14 @@ static void swap_screen(Terminal *term, int which,
         }
 
         term->alt_which = which;
+
+        /*
+         * The front end may display the scrollbar differently
+         * depending on which screen is active (e.g. greyed out
+         * while the alternate screen is in use), so make sure it
+         * hears about the change.
+         */
+        term->win_scrollbar_update_pending = true;
 
         ttr = term->alt_screen;
         term->alt_screen = term->screen;

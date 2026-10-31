@@ -796,6 +796,11 @@ CONF_OPTION(scrollbar_in_fullscreen,
     DEFAULT_BOOL(false),
     SAVE_KEYWORD("ScrollBarFullScreen"),
 )
+CONF_OPTION(disable_scrollbar_in_altscreen,
+    VALUE_TYPE(BOOL),
+    DEFAULT_BOOL(true),
+    SAVE_KEYWORD("DisableScrollbarInAltScreen"),
+)
 CONF_OPTION(resize_action,
     VALUE_TYPE(INT),
     DEFAULT_INT(RESIZE_TERM),
