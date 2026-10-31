@@ -66,7 +66,8 @@ void win_setup_config_box(struct controlbox *b, HWND *hwndp, bool has_help,
 
     /*
      * Full-screen mode is a Windows peculiarity; hence
-     * scrollbar_in_fullscreen is as well.
+     * scrollbar_in_fullscreen is as well. So is greying out the
+     * scrollbar while the alternate screen is in use.
      */
     s = ctrl_getset(b, "Window", "scrollback",
                     "Control the scrollback in the window");
@@ -74,8 +75,12 @@ void win_setup_config_box(struct controlbox *b, HWND *hwndp, bool has_help,
                   HELPCTX(window_scrollback),
                   conf_checkbox_handler,
                   I(CONF_scrollbar_in_fullscreen));
+    ctrl_checkbox(s, "Disable scrollbar in alternate screen", 'a',
+                  HELPCTX(window_scrollback),
+                  conf_checkbox_handler,
+                  I(CONF_disable_scrollbar_in_altscreen));
     /*
-     * Really this wants to go just after `Display scrollbar'. See
+     * Really these want to go just after `Display scrollbar'. See
      * if we can find that control, and do some shuffling.
      */
     {
@@ -85,14 +90,17 @@ void win_setup_config_box(struct controlbox *b, HWND *hwndp, bool has_help,
             if (c->type == CTRL_CHECKBOX &&
                 c->context.i == CONF_scrollbar) {
                 /*
-                 * Control i is the scrollbar checkbox.
-                 * Control s->ncontrols-1 is the scrollbar-in-FS one.
+                 * Control i is the scrollbar checkbox. The two
+                 * Windows-specific ones are the last two controls;
+                 * move them to positions i+1 and i+2.
                  */
-                if (i < s->ncontrols-2) {
-                    c = s->ctrls[s->ncontrols-1];
-                    memmove(s->ctrls+i+2, s->ctrls+i+1,
-                            (s->ncontrols-i-2)*sizeof(dlgcontrol *));
-                    s->ctrls[i+1] = c;
+                dlgcontrol *c1 = s->ctrls[s->ncontrols-2];
+                dlgcontrol *c2 = s->ctrls[s->ncontrols-1];
+                if (i < s->ncontrols-3) {
+                    memmove(s->ctrls+i+3, s->ctrls+i+1,
+                            (s->ncontrols-i-3)*sizeof(dlgcontrol *));
+                    s->ctrls[i+1] = c1;
+                    s->ctrls[i+2] = c2;
                 }
                 break;
             }
